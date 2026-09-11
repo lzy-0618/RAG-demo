@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+pydantic
+pydantic-settings
+python-dotenv
+dify-client
+python-multipart
+sse-starlette
+httpx
+PyJWT
+python-docx
+docxtpl
+# 文档解析（按需启用）
+# unstructured
+# pymupdf
