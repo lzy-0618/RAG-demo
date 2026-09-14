@@ -1,0 +1,343 @@
+# =====================================================================
+# 应用四：合规咨询 Chatflow（需求④）
+# 设计依据：docs/Dify应用与工作流设计.md 第 2 节（检索范围按最新确认收窄为 2 库）
+# 格式依据：Dify 1.17.0 真实导出格式（节点顶层 type: custom，语义类型在 data.type）
+#
+# 编排：Start（无输入变量，用户提问即 sys.query）
+#   → LLM 问题改写（结合多轮对话历史，把追问改写为独立完整问题）
+#   → Code 改写兜底（改写为空/异常时回退原始提问）
+#   → 知识检索（某钢规章制度库 + 专家知识库，2 库，Top K 3）
+#   → LLM 回答（带对话记忆 + 检索上下文）
+#   → 直接回复(Answer)
+#
+# 导入后必做：
+#   1. 「知识检索」节点 dataset_ids 为空，需在 UI 选择 2 个知识库：
+#      某钢规章制度库 / 专家知识库
+#   2. LLM 节点模型为 langgenius/deepseek/deepseek → deepseek-chat
+#   3. features.retriever_resource 已开启，勿关闭（前端引用来源卡片依赖它）
+# =====================================================================
+app:
+  description: 企业合规咨询助手：基于某钢现行规章制度与专家纠错知识库，多轮解答差旅/接待/招采等环节的合规问题，回答附依据来源。
+  icon: 💬
+  icon_background: '#E8FFD5'
+  mode: advanced-chat
+  name: 合规咨询
+  use_icon_as_answer_icon: false
+
+dependencies: []
+kind: app
+version: 0.3.1
+
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload: {}
+    opening_statement: 你好，我是某钢集团企业合规助手。你可以咨询差旅、接待、招采等环节的合规问题，我会依据公司现行规章制度与专家标注内容作答并附上依据来源。
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions:
+      - 差旅住宿标准是多少？
+      - 业务接待的费用上限和审批流程是什么？
+      - 招标采购中哪些情形属于违规？
+      - 供应商准入需要满足哪些条件？
+    suggested_questions_after_answer:
+      enabled: true
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: start
+          targetType: llm
+        id: edge-start-rewrite
+        source: start
+        sourceHandle: source
+        target: llm_rewrite
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: llm
+          targetType: code
+        id: edge-rewrite-guard
+        source: llm_rewrite
+        sourceHandle: source
+        target: code_rewrite
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: code
+          targetType: knowledge-retrieval
+        id: edge-guard-retriever
+        source: code_rewrite
+        sourceHandle: source
+        target: retriever
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: knowledge-retrieval
+          targetType: llm
+        id: edge-retriever-answer
+        source: retriever
+        sourceHandle: source
+        target: llm_answer
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: llm
+          targetType: answer
+        id: edge-answer
+        source: llm_answer
+        sourceHandle: source
+        target: answer
+        targetHandle: target
+        type: custom
+        zIndex: 0
+    nodes:
+      - data:
+          desc: ''
+          selected: false
+          title: 开始
+          type: start
+          # 不设咨询类别：用户直接提问 → 知识库检索 → 回答（类别由模型按问题自行判断）
+          variables: []
+        height: 90
+        id: start
+        position: {x: 80, y: 300}
+        positionAbsolute: {x: 80, y: 300}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          context:
+            enabled: false
+            variable_selector: []
+          desc: ''
+          memory:
+            query_prompt_template: '{{#sys.query#}}'
+            window:
+              enabled: true
+              size: 10
+          model:
+            completion_params:
+              max_tokens: 256
+              temperature: 0.1
+              thinking: false
+            mode: chat
+            name: deepseek-v4-flash
+            provider: langgenius/deepseek/deepseek
+          prompt_template:
+            - role: system
+              text: |
+                你是检索问题改写助手。请结合对话历史，把用户当前的问题改写成一个独立、完整、适合知识库检索的问题。
+                要求：
+                1. 补全追问中省略的主语与对象（例如「那住宿标准呢」改写成「某钢集团差旅住宿标准是多少」）。
+                2. 用词保持与用户一致，不要扩写、不要回答、不要解释。
+                3. 只输出改写后的这一句问题，不要加引号、序号或任何前后缀。
+                4. 若当前问题本身已经完整，原样输出。
+            - role: user
+              text: '{{#sys.query#}}'
+          retry_config:
+            enabled: false
+            exponential_backoff:
+              enabled: false
+              max_interval: 10000
+              multiplier: 2
+            max_retries: 1
+            retry_interval: 1000
+          selected: false
+          structured_output:
+            enabled: false
+          title: LLM 问题改写
+          type: llm
+          vision:
+            configs:
+              variable_selector: []
+            enabled: false
+        height: 200
+        id: llm_rewrite
+        position: {x: 380, y: 300}
+        positionAbsolute: {x: 380, y: 300}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          code: |
+            import re
+
+
+            def main(rewritten: str, original: str) -> dict:
+                # 兼容模型开启思考模式的情况：剥离 <think> 思维链，只保留最终改写结果
+                text = re.sub(r"<think>.*?</think>", "", rewritten or "", flags=re.DOTALL | re.IGNORECASE)
+                text = text.strip().strip('"\'“”「」《》')
+                # 折叠换行与多余空白，避免模型输出解释性多行文本
+                text = " ".join(text.split())
+                # 改写为空或明显异常（过长）时回退原始提问，保证检索始终有 query
+                if not text or len(text) > 200:
+                    text = " ".join((original or "").split())
+                return {"question": text}
+          code_language: python3
+          desc: ''
+          outputs:
+            question:
+              children: null
+              type: string
+          selected: false
+          title: 改写兜底
+          type: code
+          variables:
+            - value_selector:
+                - llm_rewrite
+                - text
+              variable: rewritten
+            - value_selector:
+                - sys
+                - query
+              variable: original
+        height: 140
+        id: code_rewrite
+        position: {x: 680, y: 300}
+        positionAbsolute: {x: 680, y: 300}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          dataset_ids: []
+          desc: ''
+          metadata_filtering_mode: disabled
+          multiple_retrieval_config:
+            reranking_enable: false
+            reranking_mode: reranking_model
+            reranking_model:
+              model: ''
+              provider: ''
+            score_threshold: null
+            top_k: 3
+            weights: null
+          query_variable_selector:
+            - code_rewrite
+            - question
+          retrieval_mode: multiple
+          selected: false
+          title: 知识检索（制度/专家标注）
+          type: knowledge-retrieval
+          vision:
+            configs:
+              variable_selector: []
+            enabled: false
+        height: 140
+        id: retriever
+        position: {x: 980, y: 300}
+        positionAbsolute: {x: 980, y: 300}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          context:
+            enabled: true
+            variable_selector:
+              - retriever
+              - result
+          desc: ''
+          memory:
+            query_prompt_template: '{{#sys.query#}}'
+            window:
+              enabled: true
+              size: 10
+          model:
+            completion_params:
+              max_tokens: 2048
+              temperature: 0.3
+              thinking: false
+            mode: chat
+            name: deepseek-v4-flash
+            provider: langgenius/deepseek/deepseek
+          prompt_template:
+            - role: system
+              text: |
+                你是某钢集团的企业合规助手。请依据「参考资料」回答用户问题，严格基于检索结果，不臆造；若检索结果不足以回答，明确说明「知识库中暂无相关内容」。
+                要求：
+                1. 回答末尾附「依据来源」清单，列明引用的规章制度名称与具体条款。
+                2. 涉及差旅/接待/招采时，结合参考资料中的审核规则与专家标注内容给出判断。
+                3. 回答简洁、分点，不要复述本段要求。
+            - role: user
+              text: |
+                参考资料：
+                {{#context#}}
+
+                用户问题：
+                {{#sys.query#}}
+          retry_config:
+            enabled: false
+            exponential_backoff:
+              enabled: false
+              max_interval: 10000
+              multiplier: 2
+            max_retries: 1
+            retry_interval: 1000
+          selected: false
+          structured_output:
+            enabled: false
+          title: LLM 回答
+          type: llm
+          vision:
+            configs:
+              variable_selector: []
+            enabled: false
+        height: 240
+        id: llm_answer
+        position: {x: 1280, y: 300}
+        positionAbsolute: {x: 1280, y: 300}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          answer: '{{#llm_answer.text#}}'
+          desc: ''
+          selected: false
+          title: 直接回复
+          type: answer
+          variables: []
+        height: 105
+        id: answer
+        position: {x: 1580, y: 300}
+        positionAbsolute: {x: 1580, y: 300}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+    viewport:
+      x: 0
+      y: 0
+      zoom: 0.7

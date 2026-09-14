@@ -1,0 +1,679 @@
+# =====================================================================
+# 应用五：规章制度生成 Workflow（需求⑧）
+# 设计依据：docs/Dify应用与工作流设计.md 第 6 节 + 自动合规审查（修正轮）
+# 格式依据：Dify 1.17.0 真实导出格式（节点顶层 type: custom，语义类型在 data.type）
+#
+# 编排：Start(requirement, mode, outline, previous_sections, review_conflicts, revision_round)
+#   → 知识检索（法律法规 + 现行制度，2 库，写作参照）
+#   → IF mode == "outline"
+#       ├─ 大纲 → LLM 生成大纲 → Code 规整 → 聚合器
+#       └─ 全文 → LLM 撰写/修正全文 JSON → Code 兜底解析 → 聚合器
+#   → End(mode, outline_text, sections_json)
+#
+# 自动合规审查（不在本工作流内）：
+#   后端拿到 sections_json → python-docx 落盘 → 切块逐块调「制度审查」应用
+#   → 若不合规，把合并去重后的冲突清单 + 上一版全文回传本工作流重新生成，
+#     最多自动修正 3 轮（循环由后端控制，Dify 只做单轮生成）。
+#
+# 导入后必做：
+#   1. 「知识检索」节点 dataset_ids 为空，需在 UI 选择 2 个知识库：
+#      法律法规库 / 某钢规章制度库
+#   2. LLM 节点模型为 langgenius/deepseek/deepseek → deepseek-chat
+# =====================================================================
+app:
+  description: 两段式生成规章制度：mode=outline 生成可编辑大纲，mode=document 按确认后的大纲撰写全文（输出章节 JSON）。传入 previous_sections 与 review_conflicts 时进入修正模式，基于上一版全文逐条修正合规冲突。生成后由后端自动调用「制度审查」应用做合规检查。
+  icon: 📝
+  icon_background: '#F3E8FF'
+  mode: workflow
+  name: 规章制度生成
+  use_icon_as_answer_icon: false
+
+dependencies: []
+kind: app
+version: 0.3.1
+
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      allowed_file_extensions: []
+      allowed_file_types: []
+      allowed_file_upload_methods: []
+      enabled: false
+      fileUploadConfig:
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        image_file_size_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+          - local_file
+          - remote_url
+      number_limits: 3
+    opening_statement: ''
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: start
+          targetType: knowledge-retrieval
+        id: edge-start-retriever
+        source: start
+        sourceHandle: source
+        target: retriever
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: knowledge-retrieval
+          targetType: if-else
+        id: edge-retriever-branch
+        source: retriever
+        sourceHandle: source
+        target: if_mode
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: if-else
+          targetType: llm
+        id: edge-outline-llm
+        source: if_mode
+        sourceHandle: 'true'
+        target: llm_outline
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: llm
+          targetType: code
+        id: edge-outline-code
+        source: llm_outline
+        sourceHandle: source
+        target: code_outline
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: if-else
+          targetType: llm
+        id: edge-doc-llm
+        source: if_mode
+        sourceHandle: 'false'
+        target: llm_document
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: llm
+          targetType: code
+        id: edge-doc-code
+        source: llm_document
+        sourceHandle: source
+        target: code_parse
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: code
+          targetType: variable-aggregator
+        id: edge-outline-agg-text
+        source: code_outline
+        sourceHandle: source
+        target: agg_outline
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: code
+          targetType: variable-aggregator
+        id: edge-outline-agg-sections
+        source: code_outline
+        sourceHandle: source
+        target: agg_sections
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: code
+          targetType: variable-aggregator
+        id: edge-doc-agg-text
+        source: code_parse
+        sourceHandle: source
+        target: agg_outline
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: code
+          targetType: variable-aggregator
+        id: edge-doc-agg-sections
+        source: code_parse
+        sourceHandle: source
+        target: agg_sections
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: variable-aggregator
+          targetType: end
+        id: edge-agg-text-end
+        source: agg_outline
+        sourceHandle: source
+        target: end
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: variable-aggregator
+          targetType: end
+        id: edge-agg-sections-end
+        source: agg_sections
+        sourceHandle: source
+        target: end
+        targetHandle: target
+        type: custom
+        zIndex: 0
+    nodes:
+      - data:
+          desc: ''
+          selected: false
+          title: 开始
+          type: start
+          variables:
+            - label: 起草需求
+              max_length: null
+              options: []
+              required: true
+              type: paragraph
+              variable: requirement
+            - label: 生成模式
+              max_length: null
+              options:
+                - outline
+                - document
+              required: true
+              type: select
+              variable: mode
+            - label: 已确认大纲（mode=document 时传入）
+              max_length: null
+              options: []
+              required: false
+              type: paragraph
+              variable: outline
+            - label: 上一版全文（修正轮次传入，首次生成为空）
+              max_length: null
+              options: []
+              required: false
+              type: paragraph
+              variable: previous_sections
+            - label: 上一轮冲突清单 JSON（修正轮次传入）
+              max_length: null
+              options: []
+              required: false
+              type: paragraph
+              variable: review_conflicts
+            - label: 修正轮次（1 起，后端控制，最多 3）
+              max_length: null
+              options: []
+              required: false
+              type: number
+              variable: revision_round
+        height: 200
+        id: start
+        position: {x: 80, y: 300}
+        positionAbsolute: {x: 80, y: 300}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          dataset_ids: []
+          desc: ''
+          metadata_filtering_mode: disabled
+          multiple_retrieval_config:
+            reranking_enable: true
+            reranking_mode: reranking_model
+            reranking_model:
+              model: BAAI/bge-reranker-v2-m3
+              provider: langgenius/siliconflow/siliconflow
+            score_threshold: null
+            top_k: 5
+            weights: null
+          query_variable_selector:
+            - start
+            - requirement
+          retrieval_mode: multiple
+          selected: false
+          title: 知识检索（法规/现行制度）
+          type: knowledge-retrieval
+          vision:
+            configs:
+              variable_selector: []
+            enabled: false
+        height: 140
+        id: retriever
+        position: {x: 380, y: 300}
+        positionAbsolute: {x: 380, y: 300}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          cases:
+            - case_id: 'true'
+              conditions:
+                - comparison_operator: is
+                  id: cond-mode-outline
+                  value: outline
+                  varType: string
+                  variable_selector:
+                    - start
+                    - mode
+              id: 'true'
+              logical_operator: and
+          desc: ''
+          logical_operator: and
+          selected: false
+          title: 模式判断
+          type: if-else
+        height: 140
+        id: if_mode
+        position: {x: 680, y: 300}
+        positionAbsolute: {x: 680, y: 300}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          context:
+            enabled: true
+            variable_selector:
+              - retriever
+              - result
+          desc: ''
+          memory:
+            enabled: false
+            window:
+              enabled: false
+              size: 50
+          model:
+            completion_params:
+              max_tokens: 4096
+              temperature: 0.3
+              thinking: false
+            mode: chat
+            name: deepseek-v4-flash
+            provider: langgenius/deepseek/deepseek
+          prompt_template:
+            - role: system
+              text: |
+                你是企业规章制度起草专家。请根据起草需求，输出一份规章制度的**大纲**，供用户确认后再撰写全文。
+                参考资料（现行制度/法律法规，仅供体例与条款依据参照，不要照抄无关内容）：
+                {{#context#}}
+                要求：
+                1. 按「章—条」层级分章节列出标题与每章要点，标明拟设章节与关键条款意向。
+                2. 覆盖起草需求中提到的全部事项，且不与现行制度、上位法冲突。
+                3. 只输出大纲文本，使用 Markdown 标题层级（#、##），不要输出解释说明或前后缀。
+            - role: user
+              text: |
+                起草需求：
+                {{#start.requirement#}}
+          retry_config:
+            enabled: false
+            exponential_backoff:
+              enabled: false
+              max_interval: 10000
+              multiplier: 2
+            max_retries: 1
+            retry_interval: 1000
+          selected: false
+          structured_output:
+            enabled: false
+          title: LLM 生成大纲
+          type: llm
+          vision:
+            configs:
+              variable_selector: []
+            enabled: false
+        height: 220
+        id: llm_outline
+        position: {x: 980, y: 120}
+        positionAbsolute: {x: 980, y: 120}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          code: |
+            def main(outline_text: str) -> dict:
+                # 大纲分支：sections_json 置空，保持与全文分支输出同构
+                return {"outline_text": (outline_text or "").strip(), "sections_json": ""}
+          code_language: python3
+          desc: ''
+          outputs:
+            outline_text:
+              children: null
+              type: string
+            sections_json:
+              children: null
+              type: string
+          selected: false
+          title: 大纲规整
+          type: code
+          variables:
+            - value_selector:
+                - llm_outline
+                - text
+              variable: outline_text
+        height: 140
+        id: code_outline
+        position: {x: 1280, y: 120}
+        positionAbsolute: {x: 1280, y: 120}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          context:
+            enabled: true
+            variable_selector:
+              - retriever
+              - result
+          desc: ''
+          memory:
+            enabled: false
+            window:
+              enabled: false
+              size: 50
+          model:
+            completion_params:
+              max_tokens: 8192
+              response_format: json_object
+              temperature: 0.2
+              thinking: false
+            mode: chat
+            name: deepseek-v4-flash
+            provider: langgenius/deepseek/deepseek
+          prompt_template:
+            - role: system
+              text: |
+                你是企业规章制度起草专家。请按已确认的大纲撰写规章制度全文。
+                起草需求：{{#start.requirement#}}
+                已确认大纲：{{#start.outline#}}
+                参考资料（现行制度/法律法规，条款依据参照；引用的名称与条款必须来自该参考资料，不得编造）：
+                {{#context#}}
+
+                【生成模式判定】
+                上一版全文：{{#start.previous_sections#}}
+                上一轮冲突清单：{{#start.review_conflicts#}}
+                修正轮次：{{#start.revision_round#}}
+                - 若「上一版全文」为空 → 首次撰写模式：按大纲逐章撰写完整正文。
+                - 若「上一版全文」非空 → 修正模式：以「上一版全文」为基准，仅针对「上一轮冲突清单」逐条修正，
+                  未被指出的部分保持原文不变，不得新增无关章节、不得删减已有内容。
+
+                要求：
+                1. 内容不得与参考资料中的法律法规、现行制度冲突。
+                2. 语言规范、条款可执行，符合公司制度体例（章、条编号连续）。
+                3. 只输出 JSON，不要输出任何其他文字，结构：
+                {"sections": [{"title": "第一章 总则", "content": "第一条 ..."}]}
+            - role: user
+              text: |
+                请按上述要求输出规章制度全文 JSON。
+          retry_config:
+            enabled: false
+            exponential_backoff:
+              enabled: false
+              max_interval: 10000
+              multiplier: 2
+            max_retries: 1
+            retry_interval: 1000
+          selected: false
+          structured_output:
+            enabled: false
+          title: LLM 撰写/修正全文
+          type: llm
+          vision:
+            configs:
+              variable_selector: []
+            enabled: false
+        height: 300
+        id: llm_document
+        position: {x: 980, y: 480}
+        positionAbsolute: {x: 980, y: 480}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          code: |
+            import json
+            import re
+
+            THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+
+            def _extract_json(text: str, required_key: str):
+                """提取含目标键的 JSON 对象（先剥思考块，再从后往前取最后一个合法对象）。"""
+                text = THINK_RE.sub("", text or "")
+                fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
+                if fenced:
+                    text = fenced.group(1)
+                try:
+                    data = json.loads(text.strip())
+                    if isinstance(data, dict) and required_key in data:
+                        return data
+                except Exception:
+                    pass
+                starts = [i for i, ch in enumerate(text) if ch == "{"]
+                for start in reversed(starts):
+                    depth, in_str, escape = 0, False, False
+                    for i in range(start, len(text)):
+                        ch = text[i]
+                        if in_str:
+                            if escape:
+                                escape = False
+                            elif ch == "\\":
+                                escape = True
+                            elif ch == '"':
+                                in_str = False
+                            continue
+                        if ch == '"':
+                            in_str = True
+                        elif ch == "{":
+                            depth += 1
+                        elif ch == "}":
+                            depth -= 1
+                            if depth == 0:
+                                try:
+                                    data = json.loads(text[start:i + 1])
+                                except Exception:
+                                    break
+                                if isinstance(data, dict) and required_key in data:
+                                    return data
+                                break
+                return None
+
+
+            def main(llm_output: str) -> dict:
+                data = _extract_json(llm_output, "sections")
+                sections = data.get("sections") if isinstance(data, dict) else None
+                parse_error = "false"
+                if not isinstance(sections, list) or not sections:
+                    # 兜底：把清理后的原文包成单章节，保证仍能落盘，由 parse_error 标记人工复核
+                    plain = THINK_RE.sub("", llm_output or "").strip()
+                    fenced = re.search(r"```(?:json)?\s*(.*?)```", plain, re.DOTALL)
+                    if fenced:
+                        plain = fenced.group(1).strip()
+                    sections = [{"title": "正文", "content": plain}]
+                    parse_error = "true"
+                cleaned = []
+                for item in sections:
+                    if isinstance(item, dict):
+                        cleaned.append({
+                            "title": str(item.get("title") or ""),
+                            "content": str(item.get("content") or ""),
+                        })
+                    else:
+                        cleaned.append({"title": "", "content": str(item)})
+                return {
+                    "sections_json": json.dumps({"sections": cleaned}, ensure_ascii=False),
+                    "outline_text": "",
+                    "parse_error": parse_error,
+                }
+          code_language: python3
+          desc: ''
+          outputs:
+            outline_text:
+              children: null
+              type: string
+            parse_error:
+              children: null
+              type: string
+            sections_json:
+              children: null
+              type: string
+          selected: false
+          title: 兜底解析全文JSON
+          type: code
+          variables:
+            - value_selector:
+                - llm_document
+                - text
+              variable: llm_output
+        height: 180
+        id: code_parse
+        position: {x: 1280, y: 560}
+        positionAbsolute: {x: 1280, y: 560}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          advanced_settings:
+            group_enabled: false
+            groups: []
+          desc: ''
+          output_type: string
+          selected: false
+          title: 合并大纲文本
+          type: variable-aggregator
+          variables:
+            - - code_outline
+              - outline_text
+            - - code_parse
+              - outline_text
+        height: 110
+        id: agg_outline
+        position: {x: 1600, y: 220}
+        positionAbsolute: {x: 1600, y: 220}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          advanced_settings:
+            group_enabled: false
+            groups: []
+          desc: ''
+          output_type: string
+          selected: false
+          title: 合并全文章节
+          type: variable-aggregator
+          variables:
+            - - code_outline
+              - sections_json
+            - - code_parse
+              - sections_json
+        height: 110
+        id: agg_sections
+        position: {x: 1600, y: 420}
+        positionAbsolute: {x: 1600, y: 420}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          desc: ''
+          outputs:
+            - value_selector:
+                - start
+                - mode
+              value_type: string
+              variable: mode
+            - value_selector:
+                - agg_outline
+                - output
+              value_type: string
+              variable: outline_text
+            - value_selector:
+                - agg_sections
+                - output
+              value_type: string
+              variable: sections_json
+          selected: false
+          title: 结束
+          type: end
+        height: 140
+        id: end
+        position: {x: 1900, y: 320}
+        positionAbsolute: {x: 1900, y: 320}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+    viewport:
+      x: 0
+      y: 0
+      zoom: 0.6

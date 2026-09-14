@@ -20,6 +20,13 @@ htmlcov/
 .env.local
 !.env.example
 
+# === 运行期数据（本地库、上传文件、生成产物） ===
+*.db
+*.sqlite3
+uploads/
+outputs/
+backend/templates/
+
 # === Node / 前端 ===
 node_modules/
 dist/

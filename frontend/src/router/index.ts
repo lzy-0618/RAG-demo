@@ -4,6 +4,12 @@ import type { RouteRecordRaw } from 'vue-router'
 const routes: RouteRecordRaw[] = [
   { path: '/', redirect: '/chat' },
   {
+    path: '/login',
+    name: 'login',
+    component: () => import('@/views/LoginView.vue'),
+    meta: { title: '登录', public: true },
+  },
+  {
     path: '/chat',
     name: 'chat',
     component: () => import('@/views/ChatView.vue'),
@@ -22,6 +28,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '合同审查' },
   },
   {
+    path: '/review/regulation',
+    name: 'regulationReview',
+    component: () => import('@/views/RegulationReviewView.vue'),
+    meta: { title: '制度审查' },
+  },
+  {
     path: '/generate',
     name: 'generate',
     component: () => import('@/views/GenerateView.vue'),
@@ -33,12 +45,6 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/TemplateView.vue'),
     meta: { title: '合同模板库' },
   },
-  {
-    path: '/correct',
-    name: 'correct',
-    component: () => import('@/views/CorrectView.vue'),
-    meta: { title: '内容纠错' },
-  },
 ]
 
 const router = createRouter({
@@ -46,9 +52,17 @@ const router = createRouter({
   routes,
 })
 
-// TODO: 路由守卫：未登录跳转、按钮级权限（RBAC）
 router.beforeEach((to, _from, next) => {
   document.title = `${to.meta.title ?? 'RAG_demo'} - 企业合规智能平台`
+  const token = localStorage.getItem('token')
+  if (!to.meta.public && !token) {
+    next({ path: '/login', query: { redirect: to.fullPath } })
+    return
+  }
+  if (to.path === '/login' && token) {
+    next('/chat')
+    return
+  }
   next()
 })
 

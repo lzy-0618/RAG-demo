@@ -11,6 +11,7 @@ httpx
 PyJWT
 python-docx
 docxtpl
-# 文档解析（按需启用）
+# 文档解析：审查服务解析 PDF / docx 并切块（需求 ②③）
+pymupdf
+# 扫描件 / 复杂法务文档 OCR 预处理（按需启用）
 # unstructured
-# pymupdf

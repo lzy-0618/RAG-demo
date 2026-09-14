@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
 
+    # 种子账号（启动时幂等创建；密码留空则不创建该账号，生产环境请改掉默认值）
+    SEED_EXPERT_USERNAME: str = "expert"
+    SEED_EXPERT_PASSWORD: str = ""
+    SEED_USER_USERNAME: str = "user01"
+    SEED_USER_PASSWORD: str = ""
+
     # Dify
     DIFY_BASE_URL: str = "http://localhost"
     DIFY_API_KEY: str = ""
@@ -32,8 +38,16 @@ class Settings(BaseSettings):
 
     # Dify 应用级 API Key（按业务场景隔离，未配置时回退到 DIFY_API_KEY）
     DIFY_CHAT_APP_KEY: str = ""
-    DIFY_REVIEW_APP_KEY: str = ""
+    DIFY_CONTRACT_REVIEW_APP_KEY: str = ""
+    DIFY_REGULATION_REVIEW_APP_KEY: str = ""
     DIFY_GENERATE_APP_KEY: str = ""
+
+    # 知识库 dataset_id（与 dify/ 下的 5 个知识库一一对应）
+    DATASET_ID_LAW: str = ""
+    DATASET_ID_REGULATION: str = ""
+    DATASET_ID_CASE: str = ""
+    DATASET_ID_RULE: str = ""
+    DATASET_ID_EXPERT: str = ""
 
     # 知识库 / 向量
     EMBEDDING_MODEL: str = ""
