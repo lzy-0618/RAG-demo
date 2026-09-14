@@ -1,0 +1,9 @@
+{
+  "ownerId": "537081",
+  "publishedAt": 1781168401606,
+  "slug": "dwb",
+  "version": "2.0.0",
+  "targetDifyVersion": "1.17.0",
+  "dslVersion": "0.7.0",
+  "notes": "Rewritten against the real Dify 1.17 export format. Node envelope is type: custom with the kind in data.type; kind: app; version 0.7.0; env/conversation variables keyed by name; aggregator variables are [node, key] pairs; code_language instead of language; http-request requires headers/params. Every shipped DSL is validated inside a running dify-api container against Dify's own pydantic node models."
+}

@@ -1,0 +1,305 @@
+app:
+  description: Answer questions from a knowledge base, optionally grounding on a document the user uploads.
+  icon: 📖
+  icon_type: emoji
+  icon_background: '#E0F2FE'
+  mode: advanced-chat
+  name: Doc Q&A System
+  use_icon_as_answer_icon: false
+dependencies: []
+kind: app
+version: 0.7.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      enabled: false
+      allowed_file_extensions: []
+      allowed_file_types: []
+      allowed_file_upload_methods: []
+      number_limits: 3
+      fileUploadConfig:
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        image_file_size_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+    opening_statement: Ask about our documents, or upload one of your own.
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions:
+    - What does the contract template require?
+    - Summarise the uploaded document.
+    suggested_questions_after_answer:
+      enabled: true
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: document-extractor
+      id: edge-start-extract_doc
+      source: start
+      sourceHandle: source
+      target: extract_doc
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: knowledge-retrieval
+      id: edge-start-retriever
+      source: start
+      sourceHandle: source
+      target: retriever
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: document-extractor
+        targetType: llm
+      id: edge-extract_doc-llm_answer
+      source: extract_doc
+      sourceHandle: source
+      target: llm_answer
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: knowledge-retrieval
+        targetType: llm
+      id: edge-retriever-llm_answer
+      source: retriever
+      sourceHandle: source
+      target: llm_answer
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: answer
+      id: edge-llm_answer-answer
+      source: llm_answer
+      sourceHandle: source
+      target: answer
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        type: start
+        title: 开始
+        desc: ''
+        selected: false
+        variables:
+        - variable: upload
+          label: Optional document
+          type: file
+          required: false
+          max_length: null
+          options: []
+          allowed_file_types:
+          - document
+          allowed_file_extensions:
+          - .pdf
+          - .docx
+          - .md
+          allowed_file_upload_methods:
+          - local_file
+          - remote_url
+      height: 90
+      id: start
+      position:
+        x: 80
+        y: 340
+      positionAbsolute:
+        x: 80
+        y: 340
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: document-extractor
+        title: 解析上传文档
+        desc: ''
+        selected: false
+        variable_selector:
+        - start
+        - upload
+      height: 140
+      id: extract_doc
+      position:
+        x: 400
+        y: 220
+      positionAbsolute:
+        x: 400
+        y: 220
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: knowledge-retrieval
+        title: 知识检索
+        desc: ''
+        selected: false
+        query_variable_selector:
+        - sys
+        - query
+        dataset_ids: []
+        retrieval_mode: multiple
+        multiple_retrieval_config:
+          top_k: 4
+          score_threshold: null
+          reranking_enable: true
+          reranking_mode: reranking_model
+          reranking_model:
+            provider: ''
+            model: ''
+          weights: null
+        metadata_filtering_mode: disabled
+        vision:
+          enabled: false
+          configs:
+            variable_selector: []
+      height: 140
+      id: retriever
+      position:
+        x: 400
+        y: 440
+      positionAbsolute:
+        x: 400
+        y: 440
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: llm
+        title: LLM 回答
+        desc: ''
+        selected: false
+        model:
+          provider: langgenius/openai/openai
+          name: gpt-4o
+          mode: chat
+          completion_params:
+            temperature: 0.2
+            max_tokens: 1600
+            top_p: 1
+        prompt_template:
+        - role: system
+          text: 'Answer from the retrieved context and, when a document was uploaded, from that document as well.
+
+            Rules:
+
+            - Cite each claim as [Source N] (knowledge base) or [Uploaded doc] (attachment).
+
+            - If neither source covers the question, say so and offer to escalate.
+
+            - Quote exact clause numbers when you rely on one.'
+        - role: user
+          text: 'Uploaded document (may be empty):
+
+            {{#extract_doc.text#}}
+
+
+            Knowledge base context:
+
+            {{#context#}}
+
+
+            Question:
+
+            {{#sys.query#}}'
+        context:
+          enabled: true
+          variable_selector:
+          - retriever
+          - result
+        vision:
+          enabled: false
+          configs:
+            variable_selector: []
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          window:
+            enabled: true
+            size: 10
+        structured_output:
+          enabled: false
+        reasoning_format: tagged
+        retry_config:
+          enabled: false
+          exponential_backoff:
+            enabled: false
+            max_interval: 10000
+            multiplier: 2
+          max_retries: 1
+          retry_interval: 1000
+      height: 200
+      id: llm_answer
+      position:
+        x: 780
+        y: 340
+      positionAbsolute:
+        x: 780
+        y: 340
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: answer
+        title: 直接回复
+        desc: ''
+        selected: false
+        answer: '{{#llm_answer.text#}}'
+        variables: []
+      height: 105
+      id: answer
+      position:
+        x: 1140
+        y: 340
+      positionAbsolute:
+        x: 1140
+        y: 340
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    viewport:
+      x: 0
+      y: 0
+      zoom: 0.7

@@ -1,0 +1,339 @@
+app:
+  description: Split pasted input into items, summarise each inside an iteration container, then join the results.
+  icon: 🔁
+  icon_type: emoji
+  icon_background: '#CFFAFE'
+  mode: workflow
+  name: Iteration Batch Processor
+  use_icon_as_answer_icon: false
+dependencies: []
+kind: app
+version: 0.7.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      enabled: false
+      allowed_file_extensions: []
+      allowed_file_types: []
+      allowed_file_upload_methods: []
+      number_limits: 3
+      fileUploadConfig:
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        image_file_size_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+    opening_statement: ''
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: code
+      id: edge-start-code_split
+      source: start
+      sourceHandle: source
+      target: code_split
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: iteration
+      id: edge-code_split-iter_items
+      source: code_split
+      sourceHandle: source
+      target: iter_items
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: true
+        isInLoop: false
+        sourceType: iteration-start
+        targetType: llm
+      id: edge-iter_itemsstart-llm_item
+      source: iter_itemsstart
+      sourceHandle: source
+      target: llm_item
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: iteration
+        targetType: code
+      id: edge-iter_items-code_join
+      source: iter_items
+      sourceHandle: source
+      target: code_join
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: end
+      id: edge-code_join-end
+      source: code_join
+      sourceHandle: source
+      target: end
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        type: start
+        title: 开始
+        desc: ''
+        selected: false
+        variables:
+        - variable: raw_items
+          label: Items, one per line (or a JSON array)
+          type: paragraph
+          required: true
+          max_length: null
+          options: []
+      height: 90
+      id: start
+      position:
+        x: 80
+        y: 340
+      positionAbsolute:
+        x: 80
+        y: 340
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: code
+        title: 拆分条目
+        desc: ''
+        selected: false
+        code: "import json\nimport re\n\n\ndef main(raw: str) -> dict:\n    \"\"\"Split pasted input into a clean list of items, one per line or JSON array.\"\"\"\n    text = (raw or \"\").strip()\n    items: list[str] = []\n    if text.startswith(\"[\"):\n        try:\n            parsed = json.loads(text)\n            if isinstance(parsed, list):\n                items = [str(item).strip() for item in parsed]\n        except Exception:\n            items = []\n    if not items:\n        items = [line.strip() for line in re.split(r\"\\r?\\n\", text) if line.strip()]\n    items = [item for item in items if item][:50]\n    return {\"items\": items, \"count\": str(len(items))}\n"
+        code_language: python3
+        variables:
+        - variable: raw
+          value_selector:
+          - start
+          - raw_items
+        outputs:
+          items:
+            children: null
+            type: array[string]
+          count:
+            children: null
+            type: string
+      height: 160
+      id: code_split
+      position:
+        x: 400
+        y: 340
+      positionAbsolute:
+        x: 400
+        y: 340
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: iteration
+        title: 逐条处理
+        desc: ''
+        selected: false
+        start_node_id: iter_itemsstart
+        iterator_selector:
+        - code_split
+        - items
+        output_selector:
+        - llm_item
+        - text
+        is_parallel: true
+        parallel_nums: 5
+        error_handle_mode: continue-on-error
+        flatten_output: true
+      height: 204
+      id: iter_items
+      position:
+        x: 760
+        y: 340
+      positionAbsolute:
+        x: 760
+        y: 340
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 808
+      zIndex: 1
+    - data:
+        type: iteration-start
+        title: ''
+        desc: ''
+        selected: false
+        isInIteration: true
+      draggable: false
+      extent: parent
+      id: iter_itemsstart
+      parentId: iter_items
+      position:
+        x: 820
+        y: 418
+      selectable: false
+      type: custom-iteration-start
+      zIndex: 1002
+    - data:
+        type: llm
+        title: LLM 单条处理
+        desc: ''
+        selected: false
+        model:
+          provider: langgenius/openai/openai
+          name: gpt-4o-mini
+          mode: chat
+          completion_params:
+            temperature: 0.2
+            max_tokens: 600
+            top_p: 1
+        prompt_template:
+        - role: system
+          text: Summarise one item in a single sentence of at most 25 words, then list at most two action points. Output plain text.
+        - role: user
+          text: 'Item:
+
+            {{#iter_items.item#}}'
+        context:
+          enabled: false
+          variable_selector: []
+        vision:
+          enabled: false
+          configs:
+            variable_selector: []
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          window:
+            enabled: false
+            size: 10
+        structured_output:
+          enabled: false
+        reasoning_format: tagged
+        retry_config:
+          enabled: false
+          exponential_backoff:
+            enabled: false
+            max_interval: 10000
+            multiplier: 2
+          max_retries: 1
+          retry_interval: 1000
+        isInIteration: true
+        iteration_id: iter_items
+      height: 200
+      id: llm_item
+      position:
+        x: 1000
+        y: 440
+      positionAbsolute:
+        x: 1000
+        y: 440
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+      parentId: iter_items
+    - data:
+        type: code
+        title: 汇总结果
+        desc: ''
+        selected: false
+        code: "import json\n\n\ndef main(results, count: str) -> dict:\n    \"\"\"Turn the iteration output into a single readable report.\"\"\"\n    if isinstance(results, str):\n        try:\n            results = json.loads(results)\n        except Exception:\n            results = [results]\n    if not isinstance(results, list):\n        results = [str(results)]\n\n    lines = []\n    for index, item in enumerate(results, 1):\n        text = item if isinstance(item, str) else json.dumps(item, ensure_ascii=False)\n        lines.append(\"%d. %s\" % (index, \" \".join(text.split())))\n    report = \"Processed %s item(s).\\n\\n%s\" % (count, \"\\n\".join(lines))\n    return {\"report\": report}\n"
+        code_language: python3
+        variables:
+        - variable: results
+          value_selector:
+          - iter_items
+          - output
+        - variable: count
+          value_selector:
+          - code_split
+          - count
+        outputs:
+          report:
+            children: null
+            type: string
+      height: 160
+      id: code_join
+      position:
+        x: 1620
+        y: 340
+      positionAbsolute:
+        x: 1620
+        y: 340
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: end
+        title: 结束
+        desc: ''
+        selected: false
+        outputs:
+        - variable: report
+          value_type: string
+          value_selector:
+          - code_join
+          - report
+        - variable: item_count
+          value_type: string
+          value_selector:
+          - code_split
+          - count
+      height: 140
+      id: end
+      position:
+        x: 1940
+        y: 340
+      positionAbsolute:
+        x: 1940
+        y: 340
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    viewport:
+      x: 0
+      y: 0
+      zoom: 0.7

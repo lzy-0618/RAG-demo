@@ -1,0 +1,612 @@
+app:
+  description: Draft outline, facts and angle in parallel, assemble a brief, then write and edit the article.
+  icon: ✍️
+  icon_type: emoji
+  icon_background: '#FCE7F3'
+  mode: workflow
+  name: Content Generator
+  use_icon_as_answer_icon: false
+dependencies: []
+kind: app
+version: 0.7.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      enabled: false
+      allowed_file_extensions: []
+      allowed_file_types: []
+      allowed_file_upload_methods: []
+      number_limits: 3
+      fileUploadConfig:
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        image_file_size_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+    opening_statement: ''
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: llm
+      id: edge-topic-outline
+      source: start
+      sourceHandle: source
+      target: llm_outline
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: llm
+      id: edge-topic-facts
+      source: start
+      sourceHandle: source
+      target: llm_facts
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: llm
+      id: edge-topic-angle
+      source: start
+      sourceHandle: source
+      target: llm_angle
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: template-transform
+      id: edge-outline-brief
+      source: llm_outline
+      sourceHandle: source
+      target: assemble_brief
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: template-transform
+      id: edge-facts-brief
+      source: llm_facts
+      sourceHandle: source
+      target: assemble_brief
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: template-transform
+      id: edge-angle-brief
+      source: llm_angle
+      sourceHandle: source
+      target: assemble_brief
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: template-transform
+        targetType: llm
+      id: edge-assemble_brief-llm_write
+      source: assemble_brief
+      sourceHandle: source
+      target: llm_write
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: llm
+      id: edge-llm_write-llm_edit
+      source: llm_write
+      sourceHandle: source
+      target: llm_edit
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: end
+      id: edge-llm_edit-end
+      source: llm_edit
+      sourceHandle: source
+      target: end
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        type: start
+        title: 开始
+        desc: ''
+        selected: false
+        variables:
+        - variable: topic
+          label: Topic
+          type: text-input
+          required: true
+          max_length: null
+          options: []
+        - variable: audience
+          label: Audience
+          type: text-input
+          required: false
+          max_length: null
+          options: []
+        - variable: tone
+          label: Tone
+          type: select
+          required: true
+          max_length: null
+          options:
+          - practical
+          - conversational
+          - authoritative
+        - variable: word_limit
+          label: Word limit
+          type: number
+          required: false
+          max_length: null
+          options: []
+      height: 90
+      id: start
+      position:
+        x: 80
+        y: 380
+      positionAbsolute:
+        x: 80
+        y: 380
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: llm
+        title: LLM 大纲
+        desc: ''
+        selected: false
+        model:
+          provider: langgenius/openai/openai
+          name: gpt-4o
+          mode: chat
+          completion_params:
+            temperature: 0.6
+            max_tokens: 900
+            top_p: 1
+        prompt_template:
+        - role: system
+          text: 'You are an outline editor. Produce a numbered outline of 5 to 7 sections.
+
+            Each line: ''<n>. <section title> — <one clause on what it covers>''.
+
+            Output the outline only.'
+        - role: user
+          text: 'Topic: {{#start.topic#}}
+
+            Audience: {{#start.audience#}}
+
+            Tone: {{#start.tone#}}'
+        context:
+          enabled: false
+          variable_selector: []
+        vision:
+          enabled: false
+          configs:
+            variable_selector: []
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          window:
+            enabled: false
+            size: 10
+        structured_output:
+          enabled: false
+        reasoning_format: tagged
+        retry_config:
+          enabled: false
+          exponential_backoff:
+            enabled: false
+            max_interval: 10000
+            multiplier: 2
+          max_retries: 1
+          retry_interval: 1000
+      height: 200
+      id: llm_outline
+      position:
+        x: 420
+        y: 160
+      positionAbsolute:
+        x: 420
+        y: 160
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: llm
+        title: LLM 事实要点
+        desc: ''
+        selected: false
+        model:
+          provider: langgenius/openai/openai
+          name: gpt-4o
+          mode: chat
+          completion_params:
+            temperature: 0.2
+            max_tokens: 900
+            top_p: 1
+        prompt_template:
+        - role: system
+          text: 'You are a researcher. List 5 to 8 checkable facts or figures relevant to the topic.
+
+            Mark anything you cannot verify as ''UNVERIFIED'' — the editor will decide.
+
+            Output a plain bullet list only.'
+        - role: user
+          text: 'Topic: {{#start.topic#}}
+
+            Audience: {{#start.audience#}}'
+        context:
+          enabled: false
+          variable_selector: []
+        vision:
+          enabled: false
+          configs:
+            variable_selector: []
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          window:
+            enabled: false
+            size: 10
+        structured_output:
+          enabled: false
+        reasoning_format: tagged
+        retry_config:
+          enabled: false
+          exponential_backoff:
+            enabled: false
+            max_interval: 10000
+            multiplier: 2
+          max_retries: 1
+          retry_interval: 1000
+      height: 200
+      id: llm_facts
+      position:
+        x: 420
+        y: 380
+      positionAbsolute:
+        x: 420
+        y: 380
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: llm
+        title: LLM 切入点
+        desc: ''
+        selected: false
+        model:
+          provider: langgenius/openai/openai
+          name: gpt-4o
+          mode: chat
+          completion_params:
+            temperature: 0.8
+            max_tokens: 500
+            top_p: 1
+        prompt_template:
+        - role: system
+          text: You are a magazine editor. Propose one sharp angle or hook for this topic, plus a three-sentence opening paragraph in the requested tone. Output prose only.
+        - role: user
+          text: 'Topic: {{#start.topic#}}
+
+            Audience: {{#start.audience#}}
+
+            Tone: {{#start.tone#}}'
+        context:
+          enabled: false
+          variable_selector: []
+        vision:
+          enabled: false
+          configs:
+            variable_selector: []
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          window:
+            enabled: false
+            size: 10
+        structured_output:
+          enabled: false
+        reasoning_format: tagged
+        retry_config:
+          enabled: false
+          exponential_backoff:
+            enabled: false
+            max_interval: 10000
+            multiplier: 2
+          max_retries: 1
+          retry_interval: 1000
+      height: 200
+      id: llm_angle
+      position:
+        x: 420
+        y: 600
+      positionAbsolute:
+        x: 420
+        y: 600
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: template-transform
+        title: 汇总写作简报
+        desc: ''
+        selected: false
+        template: 'TOPIC: {{ topic }}
+
+          AUDIENCE: {{ audience }}
+
+          TONE: {{ tone }}
+
+          WORD LIMIT: {{ limit }}
+
+
+          === OUTLINE ===
+
+          {{ outline }}
+
+
+          === FACTS ===
+
+          {{ facts }}
+
+
+          === ANGLE AND OPENING ===
+
+          {{ angle }}'
+        variables:
+        - variable: topic
+          value_selector:
+          - start
+          - topic
+        - variable: audience
+          value_selector:
+          - start
+          - audience
+        - variable: tone
+          value_selector:
+          - start
+          - tone
+        - variable: limit
+          value_selector:
+          - start
+          - word_limit
+        - variable: outline
+          value_selector:
+          - llm_outline
+          - text
+        - variable: facts
+          value_selector:
+          - llm_facts
+          - text
+        - variable: angle
+          value_selector:
+          - llm_angle
+          - text
+      height: 140
+      id: assemble_brief
+      position:
+        x: 780
+        y: 380
+      positionAbsolute:
+        x: 780
+        y: 380
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: llm
+        title: LLM 成稿
+        desc: ''
+        selected: false
+        model:
+          provider: langgenius/openai/openai
+          name: gpt-4o
+          mode: chat
+          completion_params:
+            temperature: 0.7
+            max_tokens: 3000
+            top_p: 1
+        prompt_template:
+        - role: system
+          text: 'Write the final article from the brief.
+
+            Rules:
+
+            - Follow the outline order; keep every section to one or two paragraphs.
+
+            - Use the supplied facts only. Drop or flag anything marked UNVERIFIED rather than presenting it as settled.
+
+            - Match the requested tone and stay within the word limit.
+
+            - Output the article only: no preamble, no meta-commentary.'
+        - role: user
+          text: '{{#assemble_brief.output#}}'
+        context:
+          enabled: false
+          variable_selector: []
+        vision:
+          enabled: false
+          configs:
+            variable_selector: []
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          window:
+            enabled: false
+            size: 10
+        structured_output:
+          enabled: false
+        reasoning_format: tagged
+        retry_config:
+          enabled: false
+          exponential_backoff:
+            enabled: false
+            max_interval: 10000
+            multiplier: 2
+          max_retries: 1
+          retry_interval: 1000
+      height: 200
+      id: llm_write
+      position:
+        x: 1140
+        y: 380
+      positionAbsolute:
+        x: 1140
+        y: 380
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: llm
+        title: LLM 修订
+        desc: ''
+        selected: false
+        model:
+          provider: langgenius/openai/openai
+          name: gpt-4o
+          mode: chat
+          completion_params:
+            temperature: 0.3
+            max_tokens: 3000
+            top_p: 1
+        prompt_template:
+        - role: system
+          text: 'You are a copy editor. Tighten the draft: cut filler, split long sentences, fix repetition. Keep the structure and every fact unchanged. Output the edited article only.'
+        - role: user
+          text: 'Tone: {{#start.tone#}}
+
+            Word limit: {{#start.word_limit#}}
+
+
+            Draft:
+
+            {{#llm_write.text#}}'
+        context:
+          enabled: false
+          variable_selector: []
+        vision:
+          enabled: false
+          configs:
+            variable_selector: []
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          window:
+            enabled: false
+            size: 10
+        structured_output:
+          enabled: false
+        reasoning_format: tagged
+        retry_config:
+          enabled: false
+          exponential_backoff:
+            enabled: false
+            max_interval: 10000
+            multiplier: 2
+          max_retries: 1
+          retry_interval: 1000
+      height: 200
+      id: llm_edit
+      position:
+        x: 1500
+        y: 380
+      positionAbsolute:
+        x: 1500
+        y: 380
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: end
+        title: 结束
+        desc: ''
+        selected: false
+        outputs:
+        - variable: article
+          value_type: string
+          value_selector:
+          - llm_edit
+          - text
+        - variable: outline
+          value_type: string
+          value_selector:
+          - llm_outline
+          - text
+      height: 140
+      id: end
+      position:
+        x: 1860
+        y: 380
+      positionAbsolute:
+        x: 1860
+        y: 380
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    viewport:
+      x: 0
+      y: 0
+      zoom: 0.7

@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     DIFY_CONTRACT_REVIEW_APP_KEY: str = ""
     DIFY_REGULATION_REVIEW_APP_KEY: str = ""
     DIFY_GENERATE_APP_KEY: str = ""
+    # 应用六：合同模板结构化（导入时识别待填字段）
+    DIFY_TEMPLATE_STRUCTURE_APP_KEY: str = ""
 
     # 知识库 dataset_id（与 dify/ 下的 5 个知识库一一对应）
     DATASET_ID_LAW: str = ""
@@ -60,7 +62,23 @@ class Settings(BaseSettings):
     # 合同模板目录（需求⑥）与生成产物目录（需求⑦⑧）与上传目录分开
     TEMPLATE_DIR: str = "templates"
     OUTPUT_DIR: str = "outputs"
+    # 合同"按当前取值"的草稿预览（内容哈希命名，天然去重）
+    CONTRACT_PREVIEW_DIR: str = "var/contract-preview"
     MAX_UPLOAD_SIZE_MB: int = 100
+
+    # 文档预览：docx → PDF（LibreOffice headless）
+    # 留空自动探测 PATH 与 macOS 应用路径
+    LIBREOFFICE_BIN: str = ""
+    # 字体目录，逗号分隔；留空按平台自动探测。容器内应显式指向 /usr/share/fonts
+    PDF_FONT_DIRS: str = ""
+    # 复用同一 soffice 进程内 profile（见 docs/PDF中文字体渲染问题排查经验.md 第 5 节）
+    PDF_PROFILE_DIR: str = "var/lo-profile"
+    PDF_CACHE_DIR: str = "var/pdf-cache"
+    PDF_CONVERT_TIMEOUT: int = 120
+    # soffice 共用 profile 会锁冲突，同一进程内必须串行
+    PDF_CONVERT_CONCURRENCY: int = 1
+    # 中文墨迹自检阈值（比例低于此值判定字形缺失，见经验文档第 4 节）
+    PDF_CJK_INK_MIN_RATIO: float = 0.005
 
 
 @lru_cache

@@ -18,6 +18,7 @@
 import sys
 
 import yaml
+from core.workflow.nodes.agent.entities import AgentNodeData
 from core.workflow.nodes.knowledge_retrieval.entities import KnowledgeRetrievalNodeData
 from graphon.nodes.answer.entities import AnswerNodeData
 from graphon.nodes.code.entities import CodeNodeData
@@ -36,6 +37,10 @@ MODELS = {
     "end": EndNodeData,
     "answer": AnswerNodeData,
     "knowledge-retrieval": KnowledgeRetrievalNodeData,
+    # Agent 节点：注意 agent 模型在 core.* 下（graphon 未提供该模块），
+    # 且 agent_strategy_provider_name / agent_strategy_name 指向的策略由插件提供，
+    # 本脚本只能校验结构，运行前需确认对应 agent 策略插件已安装。
+    "agent": AgentNodeData,
 }
 
 

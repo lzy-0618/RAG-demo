@@ -1,0 +1,721 @@
+app:
+  description: Turn a natural-language analytics question into guarded read-only SQL, analyse the rows, and email a report.
+  icon: 📊
+  icon_type: emoji
+  icon_background: '#DBEAFE'
+  mode: workflow
+  name: SQL Data Analysis
+  use_icon_as_answer_icon: false
+dependencies: []
+kind: app
+version: 0.7.0
+workflow:
+  conversation_variables: []
+  environment_variables:
+  - name: SQL_GATEWAY_URL
+    value: https://data.example.com/query
+    value_type: string
+    description: Read-only SQL gateway
+  - name: SQL_GATEWAY_TOKEN
+    value: ''
+    value_type: secret
+    description: Gateway bearer token
+  - name: EMAIL_API_URL
+    value: https://api.example.com/v3/mail/send
+    value_type: string
+    description: Email API endpoint
+  - name: EMAIL_API_KEY
+    value: ''
+    value_type: secret
+    description: Email API token
+  - name: REPORT_RECIPIENT
+    value: analytics@example.com
+    value_type: string
+    description: Report recipient
+  features:
+    file_upload:
+      enabled: false
+      allowed_file_extensions: []
+      allowed_file_types: []
+      allowed_file_upload_methods: []
+      number_limits: 3
+      fileUploadConfig:
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        image_file_size_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+    opening_statement: ''
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: llm
+      id: edge-start-llm_sql
+      source: start
+      sourceHandle: source
+      target: llm_sql
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: code
+      id: edge-llm_sql-code_guard
+      source: llm_sql
+      sourceHandle: source
+      target: code_guard
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: if-else
+      id: edge-code_guard-if_safe
+      source: code_guard
+      sourceHandle: source
+      target: if_safe
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: http-request
+      id: edge-safe-query
+      source: if_safe
+      sourceHandle: safe
+      target: http_query
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: llm
+      id: edge-unsafe-refuse
+      source: if_safe
+      sourceHandle: 'false'
+      target: llm_refuse
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: http-request
+        targetType: code
+      id: edge-http_query-code_format
+      source: http_query
+      sourceHandle: source
+      target: code_format
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: llm
+      id: edge-code_format-llm_analyze
+      source: code_format
+      sourceHandle: source
+      target: llm_analyze
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: template-transform
+      id: edge-llm_analyze-build_report
+      source: llm_analyze
+      sourceHandle: source
+      target: build_report
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: template-transform
+        targetType: http-request
+      id: edge-build_report-http_send
+      source: build_report
+      sourceHandle: source
+      target: http_send
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: template-transform
+        targetType: variable-aggregator
+      id: edge-report-agg
+      source: build_report
+      sourceHandle: source
+      target: agg_report
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: variable-aggregator
+      id: edge-refuse-agg
+      source: llm_refuse
+      sourceHandle: source
+      target: agg_report
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: variable-aggregator
+        targetType: end
+      id: edge-agg_report-end
+      source: agg_report
+      sourceHandle: source
+      target: end
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        type: start
+        title: 开始
+        desc: ''
+        selected: false
+        variables:
+        - variable: question
+          label: Analytics question
+          type: paragraph
+          required: true
+          max_length: null
+          options: []
+      height: 90
+      id: start
+      position:
+        x: 80
+        y: 340
+      positionAbsolute:
+        x: 80
+        y: 340
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: llm
+        title: LLM 生成 SQL
+        desc: ''
+        selected: false
+        model:
+          provider: langgenius/openai/openai
+          name: gpt-4o
+          mode: chat
+          completion_params:
+            temperature: 0.0
+            max_tokens: 512
+            top_p: 1
+            response_format: json_object
+        prompt_template:
+        - role: system
+          text: "Write one read-only PostgreSQL SELECT for the analytics question.\nSchema:\n  orders(id, customer_id, status, total_amount, currency, created_at)\n  order_items(order_id, product_id, quantity, unit_price)\n  customers(id, name, region, segment)\n  products(id, sku, name, category)\nRules:\n- SELECT or WITH only, never a write.\n- Always bound the row count.\n- Output SQL only, no commentary, no markdown fences."
+        - role: user
+          text: '{{#start.question#}}'
+        context:
+          enabled: false
+          variable_selector: []
+        vision:
+          enabled: false
+          configs:
+            variable_selector: []
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          window:
+            enabled: false
+            size: 10
+        structured_output:
+          enabled: false
+        reasoning_format: tagged
+        retry_config:
+          enabled: false
+          exponential_backoff:
+            enabled: false
+            max_interval: 10000
+            multiplier: 2
+          max_retries: 1
+          retry_interval: 1000
+      height: 200
+      id: llm_sql
+      position:
+        x: 400
+        y: 340
+      positionAbsolute:
+        x: 400
+        y: 340
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: code
+        title: SQL 守卫
+        desc: ''
+        selected: false
+        code: "import re\n\n\nFORBIDDEN = re.compile(\n    r\"\\b(insert|update|delete|drop|alter|truncate|grant|revoke|create|attach|copy)\\b\",\n    re.IGNORECASE,\n)\nTABLES = {\"orders\", \"order_items\", \"customers\", \"products\"}\n\n\ndef main(llm_output: str) -> dict:\n    \"\"\"Keep only the first SELECT statement and refuse anything that writes.\n\n    This node is a guard, not a sandbox: the SQL gateway behind the HTTP node must\n    still run under a read-only role with a statement timeout.\n    \"\"\"\n    sql = (llm_output or \"\").strip()\n    fence = re.search(r\"```(?:sql)?\\s*(.*?)```\", sql, re.DOTALL)\n    if fence:\n        sql = fence.group(1).strip()\n    sql = sql.rstrip(\";\").strip()\n\n    if not sql:\n        return {\"sql\": \"\", \"ok\": \"false\", \"error\": \"empty SQL\"}\n\n    lowered = sql.lower()\n    if not lowered.startswith((\"select\", \"with\")):\n        return {\"sql\": \"\", \"ok\": \"false\", \"error\": \"only SELECT is allowed\"}\n    if FORBIDDEN.search(sql):\n        return {\"sql\": \"\", \"ok\": \"false\", \"error\": \"statement contains a write keyword\"}\n\n    mentioned = set(re.findall(r\"\\bfrom\\s+([a-z_][a-z0-9_]*)\", lowered))\n    mentioned |= set(re.findall(r\"\\bjoin\\s+([a-z_][a-z0-9_]*)\", lowered))\n    unknown = {t for t in mentioned if t not in TABLES}\n    if unknown:\n        return {\"sql\": \"\", \"ok\": \"false\", \"error\": \"unknown table: \" + \", \".join(sorted(unknown))}\n\n    if \" limit \" not in lowered:\n        sql = sql + \" LIMIT 500\"\n    return {\"sql\": sql, \"ok\": \"true\", \"error\": \"\"}\n"
+        code_language: python3
+        variables:
+        - variable: llm_output
+          value_selector:
+          - llm_sql
+          - text
+        outputs:
+          sql:
+            children: null
+            type: string
+          ok:
+            children: null
+            type: string
+          error:
+            children: null
+            type: string
+      height: 160
+      id: code_guard
+      position:
+        x: 720
+        y: 340
+      positionAbsolute:
+        x: 720
+        y: 340
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: if-else
+        title: SQL 是否安全
+        desc: ''
+        selected: false
+        logical_operator: and
+        cases:
+        - case_id: safe
+          id: safe
+          logical_operator: and
+          conditions:
+          - id: cond-code_guard-ok
+            varType: string
+            variable_selector:
+            - code_guard
+            - ok
+            comparison_operator: is
+            value: 'true'
+      height: 140
+      id: if_safe
+      position:
+        x: 1040
+        y: 340
+      positionAbsolute:
+        x: 1040
+        y: 340
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: http-request
+        title: 执行查询
+        desc: ''
+        selected: false
+        method: post
+        url: '{{env.SQL_GATEWAY_URL}}'
+        authorization:
+          type: no-auth
+          config: null
+        headers: 'Authorization: Bearer {{env.SQL_GATEWAY_TOKEN}}
+
+          Content-Type: application/json'
+        params: ''
+        body:
+          type: json
+          data:
+          - key: sql
+            value: '{{#code_guard.sql#}}'
+            type: text
+        timeout:
+          connect: 10
+          read: 60
+          write: 10
+      height: 140
+      id: http_query
+      position:
+        x: 1360
+        y: 240
+      positionAbsolute:
+        x: 1360
+        y: 240
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: code
+        title: 格式化结果
+        desc: ''
+        selected: false
+        code: "import json\n\n\ndef main(body: str) -> dict:\n    \"\"\"Shape the gateway response into a compact CSV-ish digest for the LLM.\"\"\"\n    try:\n        payload = json.loads(body or \"{}\")\n    except Exception:\n        return {\"rows_csv\": \"\", \"row_count\": \"0\", \"parse_error\": \"true\"}\n\n    rows = payload.get(\"rows\") if isinstance(payload, dict) else payload\n    if not isinstance(rows, list):\n        return {\"rows_csv\": \"\", \"row_count\": \"0\", \"parse_error\": \"true\"}\n\n    if not rows:\n        return {\"rows_csv\": \"(no rows)\", \"row_count\": \"0\", \"parse_error\": \"false\"}\n\n    header = list(rows[0].keys()) if isinstance(rows[0], dict) else []\n    lines = [\",\".join(header)]\n    for row in rows[:200]:\n        lines.append(\",\".join(str(row.get(col, \"\")) for col in header))\n    return {\"rows_csv\": \"\\n\".join(lines), \"row_count\": str(len(rows)), \"parse_error\": \"false\"}\n"
+        code_language: python3
+        variables:
+        - variable: body
+          value_selector:
+          - http_query
+          - body
+        outputs:
+          rows_csv:
+            children: null
+            type: string
+          row_count:
+            children: null
+            type: string
+          parse_error:
+            children: null
+            type: string
+      height: 160
+      id: code_format
+      position:
+        x: 1700
+        y: 240
+      positionAbsolute:
+        x: 1700
+        y: 240
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: llm
+        title: LLM 分析
+        desc: ''
+        selected: false
+        model:
+          provider: langgenius/openai/openai
+          name: gpt-4o
+          mode: chat
+          completion_params:
+            temperature: 0.2
+            max_tokens: 2000
+            top_p: 1
+        prompt_template:
+        - role: system
+          text: 'Analyse the query result for the business question.
+
+            Rules:
+
+            - Lead with the direct answer in one sentence.
+
+            - Then at most 4 bullet observations, each with the number that supports it.
+
+            - State the row count you were given; if it is 0 or the parse flag is true, say the data could not be read instead of speculating.'
+        - role: user
+          text: 'Question: {{#start.question#}}
+
+
+            SQL:
+
+            {{#code_guard.sql#}}
+
+
+            Rows ({{#code_format.row_count#}} total, parse_error={{#code_format.parse_error#}}):
+
+            {{#code_format.rows_csv#}}'
+        context:
+          enabled: false
+          variable_selector: []
+        vision:
+          enabled: false
+          configs:
+            variable_selector: []
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          window:
+            enabled: false
+            size: 10
+        structured_output:
+          enabled: false
+        reasoning_format: tagged
+        retry_config:
+          enabled: false
+          exponential_backoff:
+            enabled: false
+            max_interval: 10000
+            multiplier: 2
+          max_retries: 1
+          retry_interval: 1000
+      height: 200
+      id: llm_analyze
+      position:
+        x: 2040
+        y: 240
+      positionAbsolute:
+        x: 2040
+        y: 240
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: template-transform
+        title: 组装报告
+        desc: ''
+        selected: false
+        template: 'Analysis question: {{ question }}
+
+
+          {{ analysis }}
+
+
+          ---
+
+          SQL:
+
+          {{ sql }}
+
+          Rows returned: {{ row_count }}
+
+          Generated by Dify data-analysis workflow.'
+        variables:
+        - variable: question
+          value_selector:
+          - start
+          - question
+        - variable: analysis
+          value_selector:
+          - llm_analyze
+          - text
+        - variable: sql
+          value_selector:
+          - code_guard
+          - sql
+        - variable: row_count
+          value_selector:
+          - code_format
+          - row_count
+      height: 140
+      id: build_report
+      position:
+        x: 2380
+        y: 240
+      positionAbsolute:
+        x: 2380
+        y: 240
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: http-request
+        title: 邮件发送报告
+        desc: ''
+        selected: false
+        method: post
+        url: '{{env.EMAIL_API_URL}}'
+        authorization:
+          type: no-auth
+          config: null
+        headers: 'Authorization: Bearer {{env.EMAIL_API_KEY}}
+
+          Content-Type: application/json'
+        params: ''
+        body:
+          type: json
+          data:
+          - key: to
+            value: '{{env.REPORT_RECIPIENT}}'
+            type: text
+          - key: subject
+            value: Analytics report
+            type: text
+          - key: body
+            value: '{{#build_report.output#}}'
+            type: text
+      height: 140
+      id: http_send
+      position:
+        x: 2720
+        y: 280
+      positionAbsolute:
+        x: 2720
+        y: 280
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: llm
+        title: LLM 拒绝说明
+        desc: ''
+        selected: false
+        model:
+          provider: langgenius/openai/openai
+          name: gpt-4o-mini
+          mode: chat
+          completion_params:
+            temperature: 0.0
+            max_tokens: 300
+            top_p: 1
+        prompt_template:
+        - role: system
+          text: The generated SQL was rejected by the guard. Explain the problem in plain language and ask one clarifying question. Never show raw SQL.
+        - role: user
+          text: 'Rejection reason: {{#code_guard.error#}}
+
+
+            Original question: {{#start.question#}}'
+        context:
+          enabled: false
+          variable_selector: []
+        vision:
+          enabled: false
+          configs:
+            variable_selector: []
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          window:
+            enabled: false
+            size: 10
+        structured_output:
+          enabled: false
+        reasoning_format: tagged
+        retry_config:
+          enabled: false
+          exponential_backoff:
+            enabled: false
+            max_interval: 10000
+            multiplier: 2
+          max_retries: 1
+          retry_interval: 1000
+      height: 200
+      id: llm_refuse
+      position:
+        x: 1360
+        y: 560
+      positionAbsolute:
+        x: 1360
+        y: 560
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: variable-aggregator
+        title: 合并输出
+        desc: ''
+        selected: false
+        output_type: string
+        variables:
+        - - build_report
+          - output
+        - - llm_refuse
+          - text
+        advanced_settings:
+          group_enabled: false
+          groups: []
+      height: 110
+      id: agg_report
+      position:
+        x: 3060
+        y: 380
+      positionAbsolute:
+        x: 3060
+        y: 380
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: end
+        title: 结束
+        desc: ''
+        selected: false
+        outputs:
+        - variable: report
+          value_type: string
+          value_selector:
+          - agg_report
+          - output
+        - variable: sql
+          value_type: string
+          value_selector:
+          - code_guard
+          - sql
+        - variable: guard_error
+          value_type: string
+          value_selector:
+          - code_guard
+          - error
+        - variable: row_count
+          value_type: string
+          value_selector:
+          - code_format
+          - row_count
+      height: 140
+      id: end
+      position:
+        x: 3380
+        y: 380
+      positionAbsolute:
+        x: 3380
+        y: 380
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    viewport:
+      x: 0
+      y: 0
+      zoom: 0.7

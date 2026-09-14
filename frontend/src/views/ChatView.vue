@@ -166,27 +166,41 @@ onMounted(reset)
 </script>
 
 <template>
-  <div class="chat-container">
+  <div class="chat-container reveal-group">
     <div class="toolbar">
+      <span class="u-caption">问答记录</span>
       <el-button size="small" text @click="reset">新建会话</el-button>
     </div>
 
     <div ref="listRef" class="message-list">
       <div v-for="(msg, i) in messages" :key="i" class="message" :class="msg.role">
-        <div class="bubble">
+        <div class="body">
           <div v-if="!msg.content && loading && i === messages.length - 1" class="typing">
             正在检索知识库…
           </div>
-          <div v-else v-html="renderMarkdown(msg.content)" />
-          <div v-if="msg.sources?.length" class="sources">
-            <div class="sources-title">依据来源</div>
-            <div v-for="(s, si) in msg.sources" :key="si" class="source-item">
-              <span class="doc">{{ s.document_name || '未知来源' }}</span>
-              <span v-if="s.segment_position" class="pos">第 {{ s.segment_position }} 段</span>
-              <span v-if="typeof s.score === 'number'" class="score">
-                相似度 {{ s.score.toFixed(3) }}
-              </span>
-            </div>
+          <template v-else>
+            <div class="prose" v-html="renderMarkdown(msg.content)" /><span
+              v-if="msg.role === 'assistant' && loading && i === messages.length - 1"
+              class="stream-caret"
+              aria-hidden="true"
+            />
+          </template>
+
+          <!-- 依据来源：引注式列举，编号与相似度走等宽，便于逐条比对 -->
+          <div v-if="msg.sources?.length" class="cites">
+            <p class="cites-title u-caption">依据来源</p>
+            <ol class="cites-list">
+              <li v-for="(s, si) in msg.sources" :key="si" class="cite">
+                <span class="cite-no u-num">{{ String(si + 1).padStart(2, '0') }}</span>
+                <span class="cite-doc">{{ s.document_name || '未知来源' }}</span>
+                <span v-if="s.segment_position" class="cite-meta u-num">
+                  第 {{ s.segment_position }} 段
+                </span>
+                <span v-if="typeof s.score === 'number'" class="cite-meta u-num">
+                  相似度 {{ s.score.toFixed(3) }}
+                </span>
+              </li>
+            </ol>
           </div>
 
           <!-- 专家就地标注（需求⑤）：仅专家角色、且只针对真实回答（有 message_id）可见 -->
@@ -253,98 +267,236 @@ onMounted(reset)
   flex-direction: column;
   height: 100%;
 }
+
 .toolbar {
+  flex: none;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
-  border-bottom: 1px solid #eee;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--rule);
 }
-.toolbar .label {
-  color: #606266;
-  font-size: 13px;
-}
+
 .message-list {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: var(--space-5) var(--space-5) var(--space-6);
 }
+
 .message {
-  margin-bottom: 12px;
   display: flex;
+  margin-bottom: var(--space-4);
 }
+
+@media (prefers-reduced-motion: no-preference) {
+  .message {
+    animation: z-reveal var(--dur-base) var(--ease-out) both;
+  }
+}
+
+/* 答复气泡：纸面卡片，左下角收角做气泡的「口」。
+   行长用 em 限幅，避免宽屏下一行拉到五六十个汉字。 */
+.message.assistant .body {
+  max-width: min(78%, 46em);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-xl) var(--radius-xl) var(--radius-xl) var(--radius-sm);
+  background: var(--surface);
+}
+
+/* 提问气泡：右侧深墨底，右下角收角。
+   强调色留给别处，不让用户消息再抢一个颜色。 */
 .message.user {
   justify-content: flex-end;
 }
-.bubble {
-  max-width: 74%;
-  padding: 10px 14px;
-  border-radius: 8px;
-  background: #f2f3f5;
-  line-height: 1.6;
+
+.message.user .body {
+  max-width: min(78%, 34em);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-xl) var(--radius-xl) var(--radius-sm) var(--radius-xl);
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.prose {
+  line-height: var(--lh-base);
   word-break: break-word;
 }
-.message.user .bubble {
-  background: #409eff;
-  color: #fff;
+
+.prose :deep(p) {
+  margin: 0 0 var(--space-3);
 }
-.message.user .bubble :deep(p) {
-  margin: 0;
+
+.prose :deep(p:last-child) {
+  margin-bottom: 0;
 }
-.typing {
-  color: #909399;
+
+.prose :deep(ul),
+.prose :deep(ol) {
+  margin: 0 0 var(--space-3);
+  padding-left: 1.5em;
 }
-.sources {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px dashed #dcdfe6;
-  font-size: 12px;
-  color: #606266;
+
+.prose :deep(li) {
+  margin-bottom: var(--space-1);
 }
-.sources-title {
+
+.prose :deep(strong) {
   font-weight: 600;
-  margin-bottom: 4px;
 }
-.source-item {
+
+.prose :deep(a) {
+  color: var(--accent);
+}
+
+.prose :deep(blockquote) {
+  margin: 0 0 var(--space-3);
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--rule-strong);
+  color: var(--ink-2);
+}
+
+.prose :deep(pre) {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  font-size: var(--fs-sm);
+  overflow-x: auto;
+}
+
+.prose :deep(code) {
+  font-size: 0.92em;
+}
+
+.prose :deep(pre code) {
+  font-size: inherit;
+}
+
+.prose :deep(table) {
+  width: 100%;
+  margin: 0 0 var(--space-3);
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.prose :deep(th),
+.prose :deep(td) {
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--rule);
+  text-align: left;
+}
+
+/* 深墨气泡里，正文内的代码块/引用/链接要换一套浅色，否则会变成深底压深底 */
+.message.user .prose :deep(a) {
+  color: var(--accent-wash);
+}
+
+.message.user .prose :deep(code),
+.message.user .prose :deep(pre) {
+  border-color: rgba(250, 248, 245, 0.22);
+  background: rgba(250, 248, 245, 0.12);
+  color: var(--paper);
+}
+
+.message.user .prose :deep(blockquote) {
+  border-left-color: rgba(250, 248, 245, 0.32);
+  color: var(--paper);
+}
+
+.message.user .prose :deep(th),
+.message.user .prose :deep(td) {
+  border-bottom-color: rgba(250, 248, 245, 0.2);
+}
+
+.typing {
+  color: var(--muted);
+}
+
+.cites {
+  margin-top: var(--space-4);
+  padding-top: var(--space-3);
+  border-top: 1px dashed var(--rule-strong);
+}
+
+.cites-title {
+  margin: 0 0 var(--space-2);
+}
+
+.cites-list {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cite {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
   flex-wrap: wrap;
+  font-size: var(--fs-xs);
 }
-.source-item .doc {
-  color: #409eff;
+
+.cite-no {
+  color: var(--muted);
 }
-.source-item .pos,
-.source-item .score {
-  color: #909399;
+
+.cite-doc {
+  color: var(--ink-2);
 }
+
+.cite-meta {
+  color: var(--muted);
+}
+
 .annotate-bar {
-  margin-top: 6px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
 }
+
 .annotate-block {
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
 }
+
 .annotate-label {
-  color: #909399;
-  font-size: 13px;
-  margin-bottom: 4px;
+  margin: 0 0 var(--space-1);
+  font-size: var(--fs-xs);
+  color: var(--muted);
 }
+
 .annotate-text {
-  padding: 8px 10px;
-  background: #fafafa;
-  border-radius: 4px;
-  line-height: 1.6;
+  max-height: 200px;
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-base);
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 200px;
   overflow-y: auto;
 }
+
+/* 输入区做成纸面之外的白色条带，与上方的问答记录分开 */
 .input-bar {
+  flex: none;
   display: flex;
-  gap: 12px;
-  padding: 12px;
-  border-top: 1px solid #eee;
+  align-items: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--rule);
+  background: var(--surface);
+}
+
+.input-bar :deep(.el-textarea) {
+  flex: 1;
+  min-width: 0;
 }
 </style>

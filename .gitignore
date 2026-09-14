@@ -26,6 +26,8 @@ htmlcov/
 uploads/
 outputs/
 backend/templates/
+# PDF 预览缓存 + LibreOffice profile（内含生成的 fontconfig）
+backend/var/
 
 # === Node / 前端 ===
 node_modules/

@@ -1,0 +1,381 @@
+app:
+  description: Route a message to Slack or email based on an LLM's channel decision.
+  icon: 🔔
+  icon_type: emoji
+  icon_background: '#FEF9C3'
+  mode: workflow
+  name: Auto Notification
+  use_icon_as_answer_icon: false
+dependencies: []
+kind: app
+version: 0.7.0
+workflow:
+  conversation_variables: []
+  environment_variables:
+  - name: EMAIL_API_URL
+    value: https://api.example.com/v3/mail/send
+    value_type: string
+  - name: EMAIL_API_KEY
+    value: ''
+    value_type: secret
+  - name: NOTIFY_EMAIL
+    value: ops@example.com
+    value_type: string
+  - name: SLACK_WEBHOOK
+    value: https://hooks.slack.com/services/
+    value_type: string
+  features:
+    file_upload:
+      enabled: false
+      allowed_file_extensions: []
+      allowed_file_types: []
+      allowed_file_upload_methods: []
+      number_limits: 3
+      fileUploadConfig:
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        image_file_size_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+    opening_statement: ''
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: parameter-extractor
+      id: edge-start-extract_route
+      source: start
+      sourceHandle: source
+      target: extract_route
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: parameter-extractor
+        targetType: if-else
+      id: edge-extract_route-if_channel
+      source: extract_route
+      sourceHandle: source
+      target: if_channel
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: http-request
+      id: edge-mail
+      source: if_channel
+      sourceHandle: email
+      target: http_email
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: http-request
+      id: edge-slack
+      source: if_channel
+      sourceHandle: 'false'
+      target: http_slack
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: http-request
+        targetType: variable-aggregator
+      id: edge-mail-agg
+      source: http_email
+      sourceHandle: source
+      target: agg_status
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: http-request
+        targetType: variable-aggregator
+      id: edge-slack-agg
+      source: http_slack
+      sourceHandle: source
+      target: agg_status
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: variable-aggregator
+        targetType: end
+      id: edge-agg_status-end
+      source: agg_status
+      sourceHandle: source
+      target: end
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        type: start
+        title: 开始
+        desc: ''
+        selected: false
+        variables:
+        - variable: message
+          label: Message to send
+          type: paragraph
+          required: true
+          max_length: null
+          options: []
+      height: 90
+      id: start
+      position:
+        x: 80
+        y: 300
+      positionAbsolute:
+        x: 80
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: parameter-extractor
+        title: 判断渠道
+        desc: ''
+        selected: false
+        model:
+          provider: langgenius/openai/openai
+          name: gpt-4o-mini
+          mode: chat
+          completion_params:
+            temperature: 0.0
+            max_tokens: 256
+            top_p: 1
+        query:
+        - start
+        - message
+        parameters:
+        - name: channel
+          type: select
+          description: Delivery channel
+          required: true
+          options:
+          - slack
+          - email
+        - name: subject
+          type: string
+          description: Short subject line
+          required: true
+          options: null
+        instruction: Decide whether this message is routine (slack) or needs a paper trail (email).
+        reasoning_mode: prompt
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          window:
+            enabled: false
+            size: 10
+        vision:
+          enabled: false
+          configs:
+            variable_selector: []
+      height: 140
+      id: extract_route
+      position:
+        x: 400
+        y: 300
+      positionAbsolute:
+        x: 400
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: if-else
+        title: 渠道分支
+        desc: ''
+        selected: false
+        logical_operator: and
+        cases:
+        - case_id: email
+          id: email
+          logical_operator: and
+          conditions:
+          - id: cond-extract_route-channel
+            varType: string
+            variable_selector:
+            - extract_route
+            - channel
+            comparison_operator: is
+            value: email
+      height: 140
+      id: if_channel
+      position:
+        x: 720
+        y: 300
+      positionAbsolute:
+        x: 720
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: http-request
+        title: 发送邮件
+        desc: ''
+        selected: false
+        method: post
+        url: '{{env.EMAIL_API_URL}}'
+        authorization:
+          type: no-auth
+          config: null
+        headers: 'Authorization: Bearer {{env.EMAIL_API_KEY}}
+
+          Content-Type: application/json'
+        params: ''
+        body:
+          type: json
+          data:
+          - key: to
+            value: '{{env.NOTIFY_EMAIL}}'
+            type: text
+          - key: subject
+            value: '{{#extract_route.subject#}}'
+            type: text
+          - key: body
+            value: '{{#start.message#}}'
+            type: text
+      height: 140
+      id: http_email
+      position:
+        x: 1060
+        y: 220
+      positionAbsolute:
+        x: 1060
+        y: 220
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: http-request
+        title: 发送 Slack
+        desc: ''
+        selected: false
+        method: post
+        url: '{{env.SLACK_WEBHOOK}}'
+        authorization:
+          type: no-auth
+          config: null
+        headers: 'Content-Type: application/json'
+        params: ''
+        body:
+          type: json
+          data:
+          - key: text
+            value: '{{#start.message#}}'
+            type: text
+      height: 140
+      id: http_slack
+      position:
+        x: 1060
+        y: 440
+      positionAbsolute:
+        x: 1060
+        y: 440
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: variable-aggregator
+        title: 合并状态
+        desc: ''
+        selected: false
+        output_type: number
+        variables:
+        - - http_email
+          - status_code
+        - - http_slack
+          - status_code
+        advanced_settings:
+          group_enabled: false
+          groups: []
+      height: 110
+      id: agg_status
+      position:
+        x: 1400
+        y: 300
+      positionAbsolute:
+        x: 1400
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: end
+        title: 结束
+        desc: ''
+        selected: false
+        outputs:
+        - variable: status
+          value_type: number
+          value_selector:
+          - agg_status
+          - output
+      height: 140
+      id: end
+      position:
+        x: 1720
+        y: 300
+      positionAbsolute:
+        x: 1720
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    viewport:
+      x: 0
+      y: 0
+      zoom: 0.7

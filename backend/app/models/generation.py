@@ -1,7 +1,9 @@
-"""规章制度生成任务模型（需求 ⑧）。
+"""生成任务与生成记录模型（需求 ⑦⑧）。
 
-两段式（大纲 → 全文）+ 生成后自动合规审查与修正循环，整体耗时可达数分钟，
-因此用任务 + 轮询：round 表示已完成的修正轮次（0 为首版），最多 max_rounds 轮。
+- `GenerationTask`：规章制度生成。两段式（大纲 → 全文）+ 生成后自动合规审查与修正循环，
+  整体耗时可达数分钟，因此用任务 + 轮询：round 表示已完成的修正轮次（0 为首版）。
+- `ContractGeneration`：合同生成记录。合同生成是确定性填充（秒级完成），不需要任务轮询，
+  但必须落库——否则产物是 outputs/ 里的裸文件，没有归属、无法追溯，下载也校验不了权限。
 """
 
 from datetime import datetime
@@ -10,6 +12,27 @@ from sqlalchemy import Boolean, DateTime, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
+
+
+class ContractGeneration(Base):
+    """合同生成记录（需求⑦）。
+
+    `template_name` 存快照：模板改名或删除后，历史记录仍然可读。
+    `file_name` 用 uuid 片段命名，避免同模板同秒生成互相覆盖。
+    """
+
+    __tablename__ = "contract_generations"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    template_id: Mapped[int] = mapped_column(Integer, index=True)
+    template_name: Mapped[str] = mapped_column(String(255))
+    template_version: Mapped[int] = mapped_column(Integer, default=1)
+    values_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    file_name: Mapped[str] = mapped_column(String(255))
+    file_size: Mapped[int] = mapped_column(Integer, default=0)
+    missing_variables_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class GenerationTask(Base):

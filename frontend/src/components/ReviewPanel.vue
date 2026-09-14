@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import type { UploadRawFile, UploadUserFile } from 'element-plus'
 import { getReviewTask, submitReview } from '@/api/review'
 import type { ReviewTaskOut } from '@/api/review'
+import RiskNote from '@/components/RiskNote.vue'
 
 const props = defineProps<{
   reviewType: 'contract' | 'regulation'
@@ -17,12 +18,6 @@ const submitting = ref(false)
 const task = ref<ReviewTaskOut | null>(null)
 
 let pollTimer: number | undefined
-
-const RISK_META: Record<string, { text: string; type: 'danger' | 'warning' | 'info' }> = {
-  high: { text: '高风险', type: 'danger' },
-  medium: { text: '中风险', type: 'warning' },
-  low: { text: '低风险', type: 'info' },
-}
 
 const isRunning = computed(
   () => task.value?.status === 'pending' || task.value?.status === 'running',
@@ -99,11 +94,9 @@ onBeforeUnmount(stopPolling)
 </script>
 
 <template>
-  <div class="review-panel">
+  <div class="review-panel reveal-group">
     <el-card>
-      <template #header>
-        <span>提交待审查内容</span>
-      </template>
+      <h2 class="sec-head">提交待审查内容</h2>
 
       <el-tabs v-model="inputMode">
         <el-tab-pane label="文本输入" name="text">
@@ -143,29 +136,29 @@ onBeforeUnmount(stopPolling)
     </el-card>
 
     <el-card v-if="task" class="mt">
-      <template #header>
-        <div class="progress-header">
-          <span>审查进度</span>
-          <span class="hint">
-            {{ task.status === 'completed' ? '已完成' : task.status === 'failed' ? '失败' : '进行中' }}
-            · 已审查 {{ task.completed_chunks }}/{{ task.total_chunks }} 块
-            <template v-if="task.failed_chunks">（失败 {{ task.failed_chunks }} 块）</template>
-          </span>
-        </div>
-      </template>
-      <el-progress :percentage="progress" :status="task.status === 'failed' ? 'exception' : undefined" />
-      <div v-if="task.source_name" class="hint file-name">文件：{{ task.source_name }}</div>
+      <div class="sec-bar">
+        <h2 class="sec-head flush">审查进度</h2>
+        <span class="hint u-num">
+          {{ task.status === 'completed' ? '已完成' : task.status === 'failed' ? '失败' : '进行中' }}
+          · 已审查 {{ task.completed_chunks }}/{{ task.total_chunks }} 块
+          <template v-if="task.failed_chunks">（失败 {{ task.failed_chunks }} 块）</template>
+        </span>
+      </div>
+      <el-progress
+        :percentage="progress"
+        :status="task.status === 'failed' ? 'exception' : undefined"
+      />
+      <p v-if="task.source_name" class="hint file-name">文件：{{ task.source_name }}</p>
     </el-card>
 
     <el-card v-if="task?.status === 'completed' && task.result" class="mt">
-      <template #header>
-        <div class="progress-header">
-          <span>审查结论</span>
-          <el-tag :type="task.result.is_compliant ? 'success' : 'danger'" size="small">
-            {{ task.result.is_compliant ? '未发现风险' : `发现 ${task.result.risks.length} 处风险` }}
-          </el-tag>
-        </div>
-      </template>
+      <div class="sec-bar">
+        <h2 class="sec-head flush">审查结论</h2>
+        <span class="verdict" :class="task.result.is_compliant ? 'is-clear' : 'is-risk'">
+          <span class="verdict-dot" aria-hidden="true" />
+          {{ task.result.is_compliant ? '未发现风险' : `发现 ${task.result.risks.length} 处风险` }}
+        </span>
+      </div>
 
       <el-alert
         :title="task.result.summary"
@@ -173,37 +166,18 @@ onBeforeUnmount(stopPolling)
         :closable="false"
       />
 
-      <div v-for="(risk, i) in task.result.risks" :key="i" class="risk-card">
-        <div class="risk-head">
-          <el-tag :type="RISK_META[risk.risk_level]?.type ?? 'info'" size="small">
-            {{ RISK_META[risk.risk_level]?.text ?? risk.risk_level }}
-          </el-tag>
-          <span v-if="risk.location" class="location">{{ risk.location }}</span>
-        </div>
-
-        <div class="clause">{{ risk.clause }}</div>
-
-        <div v-if="risk.violations.length" class="block">
-          <div class="block-title">违反依据</div>
-          <div v-for="(v, vi) in risk.violations" :key="vi" class="violation">
-            <span class="law">{{ v.law_name }}<template v-if="v.article"> · {{ v.article }}</template></span>
-            <span class="desc">{{ v.description }}</span>
-          </div>
-        </div>
-
-        <div v-if="risk.reference_case" class="block">
-          <div class="block-title">参考案例</div>
-          <div class="case">
-            <span class="case-name">{{ risk.reference_case.case_name }}</span>
-            <span class="desc">{{ risk.reference_case.lesson }}</span>
-          </div>
-        </div>
-
-        <div v-if="risk.suggestion" class="block">
-          <div class="block-title">修改建议</div>
-          <div class="suggestion">{{ risk.suggestion }}</div>
-        </div>
-      </div>
+      <!-- 风险条目按「批注卡」呈现，呈现细节见 RiskNote 组件 -->
+      <RiskNote
+        v-for="(risk, i) in task.result.risks"
+        :key="i"
+        :index="i"
+        :level="risk.risk_level"
+        :location="risk.location"
+        :clause="risk.clause"
+        :violations="risk.violations"
+        :reference-case="risk.reference_case"
+        :suggestion="risk.suggestion"
+      />
     </el-card>
   </div>
 </template>
@@ -211,89 +185,33 @@ onBeforeUnmount(stopPolling)
 <style scoped>
 .review-panel {
   height: 100%;
+  padding: var(--space-5);
   overflow-y: auto;
-  padding: 16px;
 }
+
 .mt {
-  margin-top: 16px;
+  margin-top: var(--space-5);
 }
+
+/* 区段头、状态标记、批注卡是跨页面复用版式，统一定义在 styles/patterns.css */
 .actions {
-  margin-top: 12px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
 }
+
 .upload-tip {
-  color: #606266;
+  color: var(--ink-2);
 }
+
 .upload-hint {
-  color: #909399;
-  font-size: 12px;
-  margin-top: 6px;
+  margin-top: var(--space-2);
+  font-size: var(--fs-xs);
+  color: var(--muted);
 }
-.progress-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.hint {
-  color: #909399;
-  font-size: 13px;
-}
+
 .file-name {
-  margin-top: 8px;
-}
-.risk-card {
-  margin-top: 16px;
-  padding: 12px 14px;
-  border: 1px solid #ebeef5;
-  border-left: 3px solid #f56c6c;
-  border-radius: 6px;
-}
-.risk-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.location {
-  color: #909399;
-  font-size: 12px;
-}
-.clause {
-  padding: 8px 10px;
-  background: #fafafa;
-  border-radius: 4px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-.block {
-  margin-top: 10px;
-  font-size: 13px;
-}
-.block-title {
-  color: #909399;
-  margin-bottom: 4px;
-}
-.violation,
-.case {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 0;
-  border-bottom: 1px dashed #f0f0f0;
-}
-.law,
-.case-name {
-  color: #409eff;
-}
-.desc {
-  color: #606266;
-  line-height: 1.6;
-}
-.suggestion {
-  color: #303133;
-  line-height: 1.6;
+  margin: var(--space-3) 0 0;
 }
 </style>

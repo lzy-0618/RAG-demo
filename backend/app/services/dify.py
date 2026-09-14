@@ -48,6 +48,28 @@ class DifyClient:
                     if line.startswith("data:"):
                         yield _parse_sse_data(line)
 
+    async def run_template_structure(
+        self,
+        api_key: str,
+        *,
+        doc_outline: str,
+        candidates_json: str,
+        template_name: str,
+        user: str,
+    ) -> dict:
+        """执行「合同模板结构化」工作流（应用六），返回 outputs。
+
+        输入是后端扫描出的文档结构大纲与候选空位清单，输出是待填字段清单 JSON
+        （fields_json）与解析失败标志（parse_error）。
+        """
+        inputs = {
+            "doc_outline": doc_outline,
+            "candidates_json": candidates_json,
+            "template_name": template_name,
+        }
+        result = await self.run_workflow(api_key=api_key, inputs=inputs, user=user)
+        return (result.get("data") or {}).get("outputs") or {}
+
     async def chat(
         self,
         api_key: str,

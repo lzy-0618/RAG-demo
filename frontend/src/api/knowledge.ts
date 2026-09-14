@@ -50,15 +50,6 @@ export function uploadDocument(datasetKey: string, file: File) {
   })
 }
 
-/** 文本入库：审核规则、专家标注等以文本为主的知识库 */
-export function createTextDocument(datasetKey: string, title: string, text: string) {
-  return http.post<never, ApiResult<DocumentOut>>('/knowledge/text', {
-    dataset_key: datasetKey,
-    title,
-    text,
-  })
-}
-
 export function listDocuments(params: {
   dataset_key?: string
   page?: number

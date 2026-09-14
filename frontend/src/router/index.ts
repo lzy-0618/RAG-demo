@@ -16,12 +16,6 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '智能问答' },
   },
   {
-    path: '/knowledge',
-    name: 'knowledge',
-    component: () => import('@/views/KnowledgeView.vue'),
-    meta: { title: '知识库管理' },
-  },
-  {
     path: '/review',
     name: 'review',
     component: () => import('@/views/ReviewView.vue'),
@@ -31,7 +25,19 @@ const routes: RouteRecordRaw[] = [
     path: '/review/regulation',
     name: 'regulationReview',
     component: () => import('@/views/RegulationReviewView.vue'),
-    meta: { title: '制度审查' },
+    meta: { title: '规章制度审查' },
+  },
+  {
+    path: '/knowledge',
+    name: 'knowledge',
+    component: () => import('@/views/KnowledgeView.vue'),
+    meta: { title: '知识库管理' },
+  },
+  {
+    path: '/templates',
+    name: 'templates',
+    component: () => import('@/views/TemplateView.vue'),
+    meta: { title: '合同模板库管理' },
   },
   {
     path: '/generate/contract',
@@ -45,12 +51,6 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/RegulationGenerateView.vue'),
     meta: { title: '规章制度生成' },
   },
-  {
-    path: '/templates',
-    name: 'templates',
-    component: () => import('@/views/TemplateView.vue'),
-    meta: { title: '合同模板库' },
-  },
 ]
 
 const router = createRouter({
@@ -59,7 +59,7 @@ const router = createRouter({
 })
 
 router.beforeEach((to, _from, next) => {
-  document.title = `${to.meta.title ?? 'RAG_demo'} - 企业合规智能平台`
+  document.title = `${to.meta.title ?? 'RAG_demo'} - 宝智审`
   const token = localStorage.getItem('token')
   if (!to.meta.public && !token) {
     next({ path: '/login', query: { redirect: to.fullPath } })

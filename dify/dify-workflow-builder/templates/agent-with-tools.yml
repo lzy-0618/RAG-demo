@@ -1,0 +1,177 @@
+app:
+  description: Tool-calling agent. The agent node is driven by a plugin strategy, so its tools and credentials are configured in the workspace, not in this file.
+  icon: 🤖
+  icon_type: emoji
+  icon_background: '#FEF3C7'
+  mode: workflow
+  name: Agent with Tools
+  use_icon_as_answer_icon: false
+dependencies: []
+kind: app
+version: 0.7.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      enabled: false
+      allowed_file_extensions: []
+      allowed_file_types: []
+      allowed_file_upload_methods: []
+      number_limits: 3
+      fileUploadConfig:
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        image_file_size_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+    opening_statement: ''
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: agent
+      id: edge-start-agent_research
+      source: start
+      sourceHandle: source
+      target: agent_research
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: agent
+        targetType: end
+      id: edge-agent_research-end
+      source: agent_research
+      sourceHandle: source
+      target: end
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        type: start
+        title: 开始
+        desc: ''
+        selected: false
+        variables: []
+      height: 90
+      id: start
+      position:
+        x: 80
+        y: 300
+      positionAbsolute:
+        x: 80
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: agent
+        title: Agent 研究
+        desc: ''
+        selected: false
+        agent_strategy_provider_name: langgenius/agent/agent
+        agent_strategy_name: ReAct
+        agent_strategy_label: ReAct
+        agent_parameters:
+          model:
+            type: constant
+            value:
+              provider: langgenius/openai/openai
+              name: gpt-4o
+              mode: chat
+              completion_params:
+                temperature: 0.2
+                max_tokens: 2048
+                top_p: 1
+          tools:
+            type: constant
+            value: []
+          instruction:
+            type: mixed
+            value: 'Answer the user''s question using the available tools.
+
+              - Plan before acting; use one tool at a time.
+
+              - Cite every fact you took from a tool result.
+
+              - If no tool can answer it, say so instead of guessing.'
+          query:
+            type: mixed
+            value: ''
+          maximum_iterations:
+            type: constant
+            value: 10
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          window:
+            enabled: false
+            size: 10
+      height: 160
+      id: agent_research
+      position:
+        x: 400
+        y: 300
+      positionAbsolute:
+        x: 400
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: end
+        title: 结束
+        desc: ''
+        selected: false
+        outputs:
+        - variable: answer
+          value_type: string
+          value_selector:
+          - agent_research
+          - text
+      height: 140
+      id: end
+      position:
+        x: 760
+        y: 300
+      positionAbsolute:
+        x: 760
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    viewport:
+      x: 0
+      y: 0
+      zoom: 0.7

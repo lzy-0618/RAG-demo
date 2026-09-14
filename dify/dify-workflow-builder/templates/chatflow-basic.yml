@@ -1,0 +1,182 @@
+app:
+  description: Single-LLM chatflow with 10-turn conversation memory.
+  icon: 💬
+  icon_type: emoji
+  icon_background: '#E8FFD5'
+  mode: advanced-chat
+  name: Basic Chatflow
+  use_icon_as_answer_icon: false
+dependencies: []
+kind: app
+version: 0.7.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      enabled: false
+      allowed_file_extensions: []
+      allowed_file_types: []
+      allowed_file_upload_methods: []
+      number_limits: 3
+      fileUploadConfig:
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        image_file_size_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+    opening_statement: Hi! What can I help you with?
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions:
+    - Summarise this week's priorities
+    - Draft a short reply to a customer
+    suggested_questions_after_answer:
+      enabled: true
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: llm
+      id: edge-start-llm_chat
+      source: start
+      sourceHandle: source
+      target: llm_chat
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: answer
+      id: edge-llm_chat-answer
+      source: llm_chat
+      sourceHandle: source
+      target: answer
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        type: start
+        title: 开始
+        desc: ''
+        selected: false
+        variables: []
+      height: 90
+      id: start
+      position:
+        x: 80
+        y: 300
+      positionAbsolute:
+        x: 80
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: llm
+        title: LLM 回答
+        desc: ''
+        selected: false
+        model:
+          provider: langgenius/openai/openai
+          name: gpt-4o-mini
+          mode: chat
+          completion_params:
+            temperature: 0.6
+            max_tokens: 1500
+            top_p: 1
+        prompt_template:
+        - role: system
+          text: 'You are a concise, friendly assistant.
+
+            Rules:
+
+            - Answer in the user''s language.
+
+            - Keep replies under 150 words unless asked for detail.
+
+            - Say so plainly when you do not know something.'
+        - role: user
+          text: '{{#sys.query#}}'
+        context:
+          enabled: false
+          variable_selector: []
+        vision:
+          enabled: false
+          configs:
+            variable_selector: []
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          window:
+            enabled: true
+            size: 10
+        structured_output:
+          enabled: false
+        reasoning_format: tagged
+        retry_config:
+          enabled: false
+          exponential_backoff:
+            enabled: false
+            max_interval: 10000
+            multiplier: 2
+          max_retries: 1
+          retry_interval: 1000
+      height: 200
+      id: llm_chat
+      position:
+        x: 400
+        y: 300
+      positionAbsolute:
+        x: 400
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: answer
+        title: 直接回复
+        desc: ''
+        selected: false
+        answer: '{{#llm_chat.text#}}'
+        variables: []
+      height: 105
+      id: answer
+      position:
+        x: 760
+        y: 300
+      positionAbsolute:
+        x: 760
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    viewport:
+      x: 0
+      y: 0
+      zoom: 0.7

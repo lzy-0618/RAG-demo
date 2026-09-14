@@ -1,0 +1,68 @@
+{
+  "skill_name": "dify-workflow-builder",
+  "evals": [
+    {
+      "id": 1,
+      "name": "rag_doc_qa",
+      "prompt": "我想在本地dify里搭一个能回答公司文档的机器人，用户上传了产品手册和FAQ后能基于这些内容回答问题，用Claude模型，能告诉我具体怎么搭吗？给我可以直接导入的DSL文件。",
+      "expected_output": "A Dify 1.17 chatflow DSL (mode: advanced-chat, kind: app, version: 0.7.0) with start -> knowledge-retrieval (top_k 3-5, reranking, dataset_ids: []) -> llm (context.enabled true, variable_selector [retriever, result]) -> answer. Every node has top-level type: custom with the kind in data.type, plus title/desc/selected and position/positionAbsolute. Every edge has sourceHandle/targetHandle and data.sourceType/targetType. features.retriever_resource.enabled is true so citation cards render. Credentials via {{env.X}} only. Includes the post-import checklist (bind dataset, configure model provider, verify the model name exists).",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "multi_channel_notification",
+      "prompt": "做一个dify工作流，紧急程度不同发到不同渠道：严重就发短信+钉钉，中等就发邮件+飞书，轻微就只发Slack。要有完整DSL和yaml文件。",
+      "expected_output": "A workflow-mode DSL with parameter-extractor (severity select + summary, reasoning_mode set, query as a [node,key] selector) -> if-else with cases severe/medium and an implicit 'false' branch -> http-request nodes for SMS, DingTalk, email, Feishu, Slack, each with the required headers and params fields (empty string when unused), authorization {type: no-auth}, json body rows, and a timeout. Branch edges use sourceHandle severe/medium/false. A variable-aggregator collects branch results as [[node, key], ...] pairs of status_code or body (scalars, not arrays). All credentials declared as {{env.X}} with value_type secret, keyed by name. Notes explain the aggregator's first-non-empty behaviour.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "multi_agent_router",
+      "prompt": "帮我搭一个dify的多agent客服系统：用户问销售问题用sales agent（带计算器工具），技术问题用tech agent（带搜索工具），账号问题用account agent。先分类再分发。",
+      "expected_output": "A DSL with question-classifier (classes [{id, name, label}], NOT categories; query_variable_selector; model) routing to three agent nodes. Classifier out-edges use sourceHandle equal to each class id. Each agent node has agent_strategy_provider_name, agent_strategy_name (ReAct or FunctionCalling) and agent_parameters as a MAP {model: {type, value}, tools: {type, value: [...]}, instruction, query, maximum_iterations}. A variable-aggregator merges the agent replies, then answer. The answer states that the classifier has no else branch and falls back to its first class, so a catch-all class is placed first, and that agent strategy plugins plus tool credentials must be configured after import.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "local_ollama_rag",
+      "prompt": "我电脑上跑了Ollama和qwen2.5:7b模型，dify也是本地docker起的，怎么搭一个完全本地的文档问答agent，不调任何外部API？",
+      "expected_output": "A DSL using provider langgenius/ollama/ollama with name qwen2.5:7b, mode chat, completion_params {temperature, max_tokens}. Mentions the networking fix: OLLAMA_API_BASE_URL=http://host.docker.internal:11434 (or the Docker bridge IP on Linux) because the container cannot reach host localhost. knowledge-retrieval with dataset_ids: [] and the note that the embedding model is chosen when the dataset is created, not in the DSL. No external service calls, no hardcoded keys.",
+      "files": []
+    },
+    {
+      "id": 5,
+      "name": "data_analysis_workflow",
+      "prompt": "用dify工作流做一个销售数据分析：用户问'上个月每天的销售额是多少'，系统自动生成SQL查数据库，LLM分析结果，邮件发给指定收件人。",
+      "expected_output": "A workflow DSL with llm (JSON SQL generation, temperature 0) -> code node that guards the SQL (SELECT/WITH only, table allow-list, LIMIT injection, strips <think> blocks and scans candidate JSON objects from the END) returning sql/ok/error -> if-else on ok -> http-request to the SQL gateway (POST, bearer token in headers via {{env.X}}, timeout block) on the safe branch and an llm explanation node on the false branch -> code node formatting rows into text -> llm analysis -> template-transform assembling the report -> http-request emailing it -> variable-aggregator -> end with report/sql/row_count/guard_error outputs. No hardcoded credentials; env vars declared for the gateway and email.",
+      "files": []
+    },
+    {
+      "id": 6,
+      "name": "diagnose_broken_dsl",
+      "prompt": "我这个dify的yaml导入进去之后画布上的节点都是坏的/显示不正常，帮我看看哪里有问题：[一个用 type: llm + data.prompt_template 写的老格式 DSL，kind: app-kind，version 0.1.5，环境变量用 variable 而不是 name，边没有 sourceHandle，聚合器用 {variable, value_selector} 对象]",
+      "expected_output": "Runs validate_dsl.py, then explains each error in plain language and gives the corrected file. Must identify: node top-level type must be custom with the kind in data.type; kind must be 'app'; version should be 0.7.0 (and that Dify does not migrate the graph, so the structure itself must be fixed); environment variables are keyed by name; missing title/desc/selected and position/positionAbsolute; edges need sourceHandle/targetHandle; aggregator variables must be [node, key] pairs; a chatflow needs an answer node rather than end. Re-validates the corrected file and reports PASS.",
+      "files": []
+    },
+    {
+      "id": 7,
+      "name": "batch_processor",
+      "prompt": "我要在dify里批量处理一组URL，每个URL用LLM提取关键信息，最后汇总。怎么搭？",
+      "expected_output": "A workflow DSL with code (split input into an array) -> iteration container -> code_join -> end. The iteration container node carries start_node_id pointing at an inner 'iteration-start' node in the same nodes array; the inner start has top-level type custom-iteration-start, parentId, extent: parent, draggable/selectable false and a relative position; body nodes carry parentId plus data.isInIteration and data.iteration_id; the inner start has a real outgoing edge (with isInIteration: true in the edge data) to the first body node, because the engine expands the container from start_node_id. iterator_selector and output_selector are set, and the body references {{#<iteration_id>.item#}}. Explains that container bodies are reached structurally, not by a top-level edge.",
+      "files": []
+    },
+    {
+      "id": 8,
+      "name": "aggregator_masks_results",
+      "prompt": "我的dify合同审查工作流判定环节明明检测出了违规，但返回的 risks 一直是空数组，帮我查一下。[DSL 中 variable-aggregator 的 variables 顺序是 [[code_judge, risks], [code_parse, risks]]，其中 code_judge 在 if-else 之前必然执行且恒返回 []]",
+      "expected_output": "Identifies the variable-aggregator ordering bug: it returns the FIRST NON-EMPTY value, and an empty array [] counts as non-empty while an unset variable does not, so the always-executed code_judge.risks ([]) masks the real risks from the branch-specific code_parse. The fix is to reorder variables so the branch-specific source comes first. Also recommends exposing a parse_error flag through the end node so truncation/parse failures are visible instead of silently producing an empty list, and raising max_tokens on JSON-producing nodes since a long input can hit finish_reason=length.",
+      "files": []
+    },
+    {
+      "id": 9,
+      "name": "regulation_generator_workflow",
+      "prompt": "帮我做一个规章制度生成的工作流：输入主题和模式（大纲/全文），大纲模式生成可编辑大纲，全文模式按确认后的大纲撰写全文，最后输出章节JSON。要能直接导入 Dify 1.17。",
+      "expected_output": "A workflow DSL with start declaring topic and mode inputs, an if-else on [start, mode] whose case has case_id equal to its own id field and the else branch as sourceHandle 'false', two llm branches (outline generation and full-document generation), code nodes parsing the LLM JSON with a <think>-tolerant backwards-scanning extractor that also emits a parse_error flag, variable-aggregator nodes merging the branch outputs as [node, key] pairs, and an end node exposing outline_text/sections_json/parse_error with value_type on each output. Validated with validate.sh against the container pydantic models and reported as PASS.",
+      "files": []
+    }
+  ]
+}

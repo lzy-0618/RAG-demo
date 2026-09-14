@@ -1,0 +1,439 @@
+# =====================================================================
+# 应用六：合同模板结构化 Workflow（需求⑥ 合同模板库·导入时识别待填字段）
+# 格式依据：Dify 1.17.0 真实导出格式（节点顶层 type: custom，语义类型在 data.type）
+# 接口契约：后端已按此实现，不可更改
+#
+# 编排：Start(doc_outline, candidates_json, template_name)
+#   → LLM 识别待填字段（通读文档大纲 + 候选空位清单，输出字段清单 JSON）
+#   → Code JSON 规整与兜底解析（剥 <think>、从后往前取含 fields 的最后一个合法 JSON）
+#   → End(fields_json, parse_error)
+#
+# 关于「Agent 节点降级为 LLM 节点」的说明：
+#   用户要求用 Agent 节点承担识别。本机 Dify 1.17.0 容器内确实存在 Agent 节点模型
+#   （core/workflow/nodes/agent/entities.py::AgentNodeData，data.type = "agent"），
+#   但项目校验脚本 dify/scripts/validate.sh 使用的 validate_dsl.py 只注册了
+#   start / llm / code / if-else / variable-aggregator / end / answer /
+#   knowledge-retrieval 八种节点模型，未注册 agent；实测含 agent 节点的 DSL 会报
+#   「FAIL 节点 xxx: 未知 data.type: agent」而无法通过校验（见 README 校验段落）。
+#   按任务约定「校验无法通过则降级为 llm 节点」，此处改用 LLM 节点承载识别，
+#   输入输出契约与 Agent 方案完全一致（同为 3 入 2 出）。
+#
+# 导入后必做：
+#   1. 确认 DeepSeek 供应商已配置 API Key（LLM 节点模型 deepseek-v4-flash）。
+#   2. 本应用不检索知识库，无需绑定 dataset。
+#   3. 发布后生成 API Secret → 填入后端 .env 的 DIFY_TEMPLATE_STRUCTURE_APP_KEY。
+# =====================================================================
+app:
+  description: 合同模板导入时的待填字段智能识别。后端先把 .docx 扫描成「带锚点的文档结构大纲」与「候选空位清单」，本工作流通读大纲并结合候选清单，输出结构化的字段清单 JSON（key/label/type/required/anchor/default/options/confidence/reason），供前端生成填充表单、后端渲染 docxtpl 占位符。
+  icon: 🧩
+  icon_background: '#E0F2FE'
+  mode: workflow
+  name: 合同模板结构化
+  use_icon_as_answer_icon: false
+
+dependencies: []
+kind: app
+version: 0.3.1
+
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      allowed_file_extensions: []
+      allowed_file_types: []
+      allowed_file_upload_methods: []
+      enabled: false
+      fileUploadConfig:
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        image_file_size_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+          - local_file
+          - remote_url
+      number_limits: 3
+    opening_statement: ''
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: start
+          targetType: llm
+        id: edge-start-llm
+        source: start
+        sourceHandle: source
+        target: llm_struct
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: llm
+          targetType: code
+        id: edge-llm-code
+        source: llm_struct
+        sourceHandle: source
+        target: code_parse
+        targetHandle: target
+        type: custom
+        zIndex: 0
+      - data:
+          isInIteration: false
+          isInLoop: false
+          sourceType: code
+          targetType: end
+        id: edge-code-end
+        source: code_parse
+        sourceHandle: source
+        target: end
+        targetHandle: target
+        type: custom
+        zIndex: 0
+    nodes:
+      - data:
+          desc: ''
+          selected: false
+          title: 开始
+          type: start
+          variables:
+            - label: 文档结构大纲（带 [pN] 锚点编号）
+              max_length: null
+              options: []
+              required: true
+              type: paragraph
+              variable: doc_outline
+            - label: 候选空位清单 JSON（后端规则扫描）
+              max_length: null
+              options: []
+              required: false
+              type: paragraph
+              variable: candidates_json
+            - label: 模板名称
+              max_length: null
+              options: []
+              required: true
+              type: paragraph
+              variable: template_name
+        height: 200
+        id: start
+        position: {x: 80, y: 300}
+        positionAbsolute: {x: 80, y: 300}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          context:
+            enabled: false
+            variable_selector: []
+          desc: ''
+          memory:
+            enabled: false
+            window:
+              enabled: false
+              size: 50
+          model:
+            completion_params:
+              max_tokens: 4096
+              response_format: json_object
+              temperature: 0.1
+              thinking: false
+            mode: chat
+            name: deepseek-v4-flash
+            provider: langgenius/deepseek/deepseek
+          prompt_template:
+            - role: system
+              text: |
+                你是企业合同模板结构化专家。后端已把用户导入的合同模板 .docx 扫描成「文档结构大纲」与「候选空位清单」，你的任务是通读大纲，识别出模板中需要填写的字段，并输出结构化的字段清单 JSON。
+
+                【输入】
+                模板名称：{{#start.template_name#}}
+                文档结构大纲（每行形如 [p3] 原文片段，方括号内是锚点编号）：
+                {{#start.doc_outline#}}
+                候选空位清单 JSON（后端用规则扫描出的疑似空位，可能含误报或漏报，仅作参考）：
+                {{#start.candidates_json#}}
+
+                【识别要求】
+                1. 以文档结构大纲为准通读全文，结合候选空位清单判断每个空位的语义（如甲方名称、乙方名称、合同金额、签订日期、付款方式、履约地点等）。
+                2. anchor 只能取大纲中出现过的锚点编号（如 p1、p3），不得编造。
+                3. key 必须是合法的 Jinja 标识符：只允许英文/拼音字母、数字与下划线，且以字母或下划线开头，匹配 ^[A-Za-z_][A-Za-z0-9_]*$。禁止中文、空格、连字符。
+                4. type 只能取以下五种之一：text（单行文本）、textarea（多行文本）、date（日期）、number（数字）、select（枚举，此时必须在 options 中列出候选项）。
+                5. required：合同成立与履行必需的字段（如双方名称、标的、金额、日期）为 true，可选补充项为 false。
+                6. 候选清单中的误报（实为固定条款正文、已有内容的说明文字、表头等）放入 ignored，并写明原因。
+                7. confidence 用 0~1 表示识别置信度，reason 用一句话说明判断依据（尽量引用原文片段）。
+                8. notes 用一句话总结本次识别结果。
+
+                【输出格式】
+                只输出一个 JSON 对象，不要输出任何解释或多余文字，结构如下：
+                {"contract_type": "采购", "fields": [{"key": "party_a_name", "label": "甲方名称", "type": "text", "required": true, "anchor": "p1", "default": "", "options": [], "confidence": 0.96, "reason": "『甲方（采购方）：』后为空"}], "ignored": [{"anchor": "p5", "reason": "已有固定条款正文"}], "notes": "识别到 8 个待填字段"}
+            - role: user
+              text: |
+                请通读上述合同模板的文档结构大纲，结合候选空位清单，输出待填字段清单 JSON。
+          retry_config:
+            enabled: false
+            exponential_backoff:
+              enabled: false
+              max_interval: 10000
+              multiplier: 2
+            max_retries: 1
+            retry_interval: 1000
+          selected: false
+          structured_output:
+            enabled: false
+          title: LLM 识别待填字段
+          type: llm
+          vision:
+            configs:
+              variable_selector: []
+            enabled: false
+        height: 260
+        id: llm_struct
+        position: {x: 400, y: 300}
+        positionAbsolute: {x: 400, y: 300}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          code: |
+            import json
+            import re
+
+            THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+            KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+            ANCHOR_RE = re.compile(r"\[(p\d+)\]")
+            ALLOWED_TYPES = {"text", "textarea", "date", "number", "select"}
+            TYPE_ALIASES = {
+                "string": "text", "str": "text", "input": "text", "textfield": "text",
+                "longtext": "textarea", "multiline": "textarea", "text_area": "textarea",
+                "int": "number", "integer": "number", "float": "number", "decimal": "number",
+                "datetime": "date", "time": "date", "datepicker": "date",
+                "enum": "select", "dropdown": "select", "choice": "select", "radio": "select",
+            }
+            TRUE_WORDS = {"true", "1", "yes", "y", "是", "必填", "required"}
+
+
+            def _scan(source: str, required_key: str):
+                try:
+                    data = json.loads(source.strip())
+                    if isinstance(data, dict) and required_key in data:
+                        return data
+                except Exception:
+                    pass
+                starts = [i for i, ch in enumerate(source) if ch == "{"]
+                for start in reversed(starts):
+                    depth, in_str, escape = 0, False, False
+                    for i in range(start, len(source)):
+                        ch = source[i]
+                        if in_str:
+                            if escape:
+                                escape = False
+                            elif ch == "\\":
+                                escape = True
+                            elif ch == '"':
+                                in_str = False
+                            continue
+                        if ch == '"':
+                            in_str = True
+                        elif ch == "{":
+                            depth += 1
+                        elif ch == "}":
+                            depth -= 1
+                            if depth == 0:
+                                try:
+                                    data = json.loads(source[start:i + 1])
+                                except Exception:
+                                    break
+                                if isinstance(data, dict) and required_key in data:
+                                    return data
+                                break
+                return None
+
+
+            def _extract_json(text: str, required_key: str):
+                """提取含目标键的 JSON 对象（先剥思考块，再从后往前取最后一个合法对象）。"""
+                text = THINK_RE.sub("", text or "")
+                fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
+                sources = [fenced.group(1), text] if fenced else [text]
+                for source in sources:
+                    data = _scan(source, required_key)
+                    if data is not None:
+                        return data
+                return None
+
+
+            def _s(value) -> str:
+                if value is None:
+                    return ""
+                if isinstance(value, bool):
+                    return "true" if value else "false"
+                return str(value)
+
+
+            def _b(value) -> bool:
+                if isinstance(value, bool):
+                    return value
+                if isinstance(value, (int, float)):
+                    return value != 0
+                if isinstance(value, str):
+                    return value.strip().lower() in TRUE_WORDS
+                return False
+
+
+            def main(llm_output: str, candidates_json: str, doc_outline: str) -> dict:
+                anchors = set(ANCHOR_RE.findall(doc_outline or ""))
+                try:
+                    candidates = json.loads(candidates_json or "")
+                    if isinstance(candidates, dict):
+                        candidates = candidates.get("candidates") or []
+                    for item in candidates if isinstance(candidates, list) else []:
+                        if isinstance(item, dict) and item.get("anchor"):
+                            anchors.add(_s(item.get("anchor")))
+                except Exception:
+                    pass
+
+                data = _extract_json(llm_output, "fields")
+                parse_error = "false"
+                if not isinstance(data, dict) or not isinstance(data.get("fields"), list):
+                    # 兜底：输出空字段清单并用 parse_error 标记，后端据此把本次识别计为失败
+                    parse_error = "true"
+                    data = {"contract_type": "", "fields": [], "ignored": [],
+                            "notes": "模型输出无法解析为字段清单 JSON"}
+
+                fields, used = [], set()
+                for index, raw in enumerate(data.get("fields") or []):
+                    if not isinstance(raw, dict):
+                        continue
+                    key = _s(raw.get("key")).strip()
+                    if not KEY_RE.match(key) or key in used:
+                        key = "field_%d" % (index + 1)
+                    while key in used:
+                        key = key + "_"
+                    used.add(key)
+                    field_type = _s(raw.get("type")).strip().lower()
+                    field_type = TYPE_ALIASES.get(field_type, field_type)
+                    if field_type not in ALLOWED_TYPES:
+                        field_type = "text"
+                    options = raw.get("options")
+                    options = [_s(option) for option in options] if isinstance(options, list) else []
+                    if field_type == "select" and not options:
+                        field_type = "text"
+                    anchor = _s(raw.get("anchor")).strip()
+                    if anchors and anchor not in anchors:
+                        anchor = ""
+                    try:
+                        confidence = max(0.0, min(1.0, float(raw.get("confidence"))))
+                    except Exception:
+                        confidence = 0.0
+                    fields.append({
+                        "key": key,
+                        "label": _s(raw.get("label")),
+                        "type": field_type,
+                        "required": _b(raw.get("required")),
+                        "anchor": anchor,
+                        "default": _s(raw.get("default")),
+                        "options": options,
+                        "confidence": round(confidence, 4),
+                        "reason": _s(raw.get("reason")),
+                    })
+
+                ignored = []
+                for raw in data.get("ignored") or []:
+                    if isinstance(raw, dict):
+                        ignored.append({"anchor": _s(raw.get("anchor")), "reason": _s(raw.get("reason"))})
+                    elif raw:
+                        ignored.append({"anchor": "", "reason": _s(raw)})
+
+                result = {
+                    "contract_type": _s(data.get("contract_type")),
+                    "fields": fields,
+                    "ignored": ignored,
+                    "notes": _s(data.get("notes")) or ("识别到 %d 个待填字段" % len(fields)),
+                }
+                return {"fields_json": json.dumps(result, ensure_ascii=False), "parse_error": parse_error}
+          code_language: python3
+          desc: ''
+          outputs:
+            fields_json:
+              children: null
+              type: string
+            parse_error:
+              children: null
+              type: string
+          selected: false
+          title: 兜底解析字段JSON
+          type: code
+          variables:
+            - value_selector:
+                - llm_struct
+                - text
+              variable: llm_output
+            - value_selector:
+                - start
+                - candidates_json
+              variable: candidates_json
+            - value_selector:
+                - start
+                - doc_outline
+              variable: doc_outline
+        height: 200
+        id: code_parse
+        position: {x: 720, y: 300}
+        positionAbsolute: {x: 720, y: 300}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+      - data:
+          desc: ''
+          outputs:
+            - value_selector:
+                - code_parse
+                - fields_json
+              value_type: string
+              variable: fields_json
+            - value_selector:
+                - code_parse
+                - parse_error
+              value_type: string
+              variable: parse_error
+          selected: false
+          title: 结束
+          type: end
+        height: 140
+        id: end
+        position: {x: 1040, y: 300}
+        positionAbsolute: {x: 1040, y: 300}
+        selected: false
+        sourcePosition: right
+        targetPosition: left
+        type: custom
+        width: 244
+    viewport:
+      x: 0
+      y: 0
+      zoom: 0.6

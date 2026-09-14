@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { UploadFile, UploadRawFile, UploadUserFile } from 'element-plus'
 import {
-  createTextDocument,
   deleteDocument,
   listDatasets,
   listDocuments,
@@ -12,6 +11,8 @@ import {
   uploadDocument,
 } from '@/api/knowledge'
 import type { DatasetOut, DocumentOut } from '@/api/knowledge'
+import { useMediaQuery } from '@/composables/useMediaQuery'
+import { formatDateTime } from '@/utils/format'
 
 const datasets = ref<DatasetOut[]>([])
 const activeKey = ref('law')
@@ -24,9 +25,9 @@ const uploading = ref(false)
 const syncing = ref(false)
 const fileList = ref<UploadUserFile[]>([])
 
-const textDialogVisible = ref(false)
-const textForm = ref({ title: '', text: '' })
-const textSubmitting = ref(false)
+// 六列全宽合计约 750px；窄于 1100 时收起次要列，
+// 否则右侧固定操作列会压住「上传人 / 上传时间」
+const showExtras = useMediaQuery('(min-width: 1100px)')
 
 // Dify 索引是异步的：parsing 状态的文档需要轮询刷新状态
 let pollTimer: number | undefined
@@ -128,24 +129,6 @@ async function onDelete(doc: DocumentOut) {
   await loadDocuments()
 }
 
-async function onTextSubmit() {
-  if (!textForm.value.title.trim() || !textForm.value.text.trim()) {
-    ElMessage.warning('标题与内容不能为空')
-    return
-  }
-  textSubmitting.value = true
-  try {
-    await createTextDocument(activeKey.value, textForm.value.title, textForm.value.text)
-    ElMessage.success('文本已提交入库')
-    textDialogVisible.value = false
-    textForm.value = { title: '', text: '' }
-    page.value = 1
-    await loadDocuments()
-  } finally {
-    textSubmitting.value = false
-  }
-}
-
 function onFileChange(_file: UploadFile, files: UploadUserFile[]) {
   fileList.value = files
 }
@@ -173,16 +156,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="page">
+  <div class="page reveal-group">
     <el-card>
-      <template #header>
-        <div class="card-header">
-          <span>知识库</span>
-          <span class="hint">共 {{ datasets.length }} 个库，当前库文档 {{ activeDataset?.document_count ?? 0 }} 篇</span>
-        </div>
-      </template>
-
-      <div class="toolbar">
+      <!-- 页标题由外壳的文书头统一承担，这里不再重复一遍卡片标题 -->
+      <div class="bar">
         <el-select v-model="activeKey" class="select" @change="onDatasetChange">
           <el-option
             v-for="d in datasets"
@@ -203,15 +180,18 @@ onBeforeUnmount(() => {
           <el-button>选择文件</el-button>
         </el-upload>
         <el-button type="primary" :loading="uploading" @click="onUpload">上传并入库</el-button>
-        <el-button @click="textDialogVisible = true">文本入库</el-button>
         <el-button :loading="syncing" @click="onSync">从 Dify 同步</el-button>
         <el-button text @click="onRefresh()">刷新列表</el-button>
+
         <span v-if="fileList.length" class="hint">已选 {{ fileList.length }} 个文件</span>
+        <span class="meta u-num">
+          共 {{ datasets.length }} 个库 · 当前库 {{ activeDataset?.document_count ?? 0 }} 篇
+        </span>
       </div>
 
       <el-table v-loading="loading" :data="documents" empty-text="暂无文档">
-        <el-table-column prop="title" label="标题" min-width="220" show-overflow-tooltip />
-        <el-table-column label="类型" width="80">
+        <el-table-column prop="title" label="标题" min-width="200" show-overflow-tooltip />
+        <el-table-column v-if="showExtras" label="类型" width="80">
           <template #default="{ row }">{{ row.doc_type === 'text' ? '文本' : '文件' }}</template>
         </el-table-column>
         <el-table-column label="状态" width="110">
@@ -226,8 +206,12 @@ onBeforeUnmount(() => {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="uploader" label="上传人" width="110" />
-        <el-table-column prop="created_at" label="上传时间" width="170" />
+        <el-table-column v-if="showExtras" prop="uploader" label="上传人" width="100" />
+        <el-table-column v-if="showExtras" label="上传时间" width="150">
+          <template #default="{ row }">
+            <span class="u-tnum">{{ formatDateTime(row.created_at) }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="150" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="onRefresh(row)">刷新状态</el-button>
@@ -245,51 +229,42 @@ onBeforeUnmount(() => {
         @current-change="loadDocuments"
       />
     </el-card>
-
-    <el-dialog v-model="textDialogVisible" title="文本入库（审核规则 / 专家标注）" width="620px">
-      <el-form label-position="top">
-        <el-form-item label="标题">
-          <el-input v-model="textForm.title" placeholder="如：差旅住宿费超标处理规则" />
-        </el-form-item>
-        <el-form-item label="内容">
-          <el-input v-model="textForm.text" type="textarea" :rows="8" placeholder="规则 / 纠错内容正文" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="textDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="textSubmitting" @click="onTextSubmit">提交入库</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
 <style scoped>
 .page {
-  padding: 16px;
   height: 100%;
+  padding: var(--space-5);
   overflow-y: auto;
 }
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.toolbar {
+
+/* 操作条：控件左聚，统计信息右靠并走等宽，替代原来卡片头里的两段文字 */
+.bar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 14px;
+  gap: var(--space-3);
   flex-wrap: wrap;
+  margin-bottom: var(--space-4);
 }
+
 .select {
   width: 220px;
 }
+
 .hint {
-  color: #909399;
-  font-size: 13px;
+  font-size: var(--fs-sm);
+  color: var(--muted);
 }
+
+.meta {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
 .pagination {
-  margin-top: 14px;
   justify-content: flex-end;
+  margin-top: var(--space-4);
 }
 </style>

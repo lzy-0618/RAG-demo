@@ -1,0 +1,501 @@
+app:
+  description: Classify intent, then hand the conversation to a specialist agent and merge the replies.
+  icon: 🧭
+  icon_type: emoji
+  icon_background: '#EDE9FE'
+  mode: advanced-chat
+  name: Multi-Agent Router
+  use_icon_as_answer_icon: false
+dependencies: []
+kind: app
+version: 0.7.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      enabled: false
+      allowed_file_extensions: []
+      allowed_file_types: []
+      allowed_file_upload_methods: []
+      number_limits: 3
+      fileUploadConfig:
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        image_file_size_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+    opening_statement: Hi! Ask about pricing, billing, or a technical issue and I'll route you to the right team.
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: true
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: question-classifier
+      id: edge-start-classifier
+      source: start
+      sourceHandle: source
+      target: classifier
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: question-classifier
+        targetType: agent
+      id: edge-cls-general
+      source: classifier
+      sourceHandle: general
+      target: agent_general
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: agent
+        targetType: variable-aggregator
+      id: edge-agent_general-agg
+      source: agent_general
+      sourceHandle: source
+      target: agg_reply
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: question-classifier
+        targetType: agent
+      id: edge-cls-sales
+      source: classifier
+      sourceHandle: sales
+      target: agent_sales
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: agent
+        targetType: variable-aggregator
+      id: edge-agent_sales-agg
+      source: agent_sales
+      sourceHandle: source
+      target: agg_reply
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: question-classifier
+        targetType: agent
+      id: edge-cls-billing
+      source: classifier
+      sourceHandle: billing
+      target: agent_billing
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: agent
+        targetType: variable-aggregator
+      id: edge-agent_billing-agg
+      source: agent_billing
+      sourceHandle: source
+      target: agg_reply
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: question-classifier
+        targetType: agent
+      id: edge-cls-technical
+      source: classifier
+      sourceHandle: technical
+      target: agent_tech
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: agent
+        targetType: variable-aggregator
+      id: edge-agent_tech-agg
+      source: agent_tech
+      sourceHandle: source
+      target: agg_reply
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: variable-aggregator
+        targetType: answer
+      id: edge-agg_reply-answer
+      source: agg_reply
+      sourceHandle: source
+      target: answer
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        type: start
+        title: 开始
+        desc: ''
+        selected: false
+        variables: []
+      height: 90
+      id: start
+      position:
+        x: 80
+        y: 380
+      positionAbsolute:
+        x: 80
+        y: 380
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: question-classifier
+        title: 意图分类
+        desc: ''
+        selected: false
+        query_variable_selector:
+        - sys
+        - query
+        model:
+          provider: langgenius/openai/openai
+          name: gpt-4o-mini
+          mode: chat
+          completion_params:
+            temperature: 0.0
+            max_tokens: 64
+            top_p: 1
+        classes:
+        - id: general
+          name: General
+          label: General
+        - id: sales
+          name: Sales
+          label: Sales
+        - id: billing
+          name: Billing
+          label: Billing
+        - id: technical
+          name: Technical
+          label: Technical
+        instruction: 'Route the user''s message to the single best team.
+
+          sales = pricing, plans, quotes, trials.
+
+          billing = invoices, refunds, payment failures.
+
+          technical = bugs, errors, API, integrations.
+
+          general = anything else.'
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          window:
+            enabled: false
+            size: 10
+        vision:
+          enabled: false
+          configs:
+            variable_selector: []
+      height: 140
+      id: classifier
+      position:
+        x: 400
+        y: 380
+      positionAbsolute:
+        x: 400
+        y: 380
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: agent
+        title: Agent agent_general
+        desc: ''
+        selected: false
+        agent_strategy_provider_name: langgenius/agent/agent
+        agent_strategy_name: FunctionCalling
+        agent_strategy_label: FunctionCalling
+        agent_parameters:
+          model:
+            type: constant
+            value:
+              provider: langgenius/openai/openai
+              name: gpt-4o
+              mode: chat
+              completion_params:
+                temperature: 0.3
+                max_tokens: 2048
+                top_p: 1
+          tools:
+            type: constant
+            value: []
+          instruction:
+            type: mixed
+            value: Handle anything that is not clearly sales, billing, or technical.
+          query:
+            type: mixed
+            value: ''
+          maximum_iterations:
+            type: constant
+            value: 6
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          window:
+            enabled: false
+            size: 10
+      height: 160
+      id: agent_general
+      position:
+        x: 760
+        y: 120
+      positionAbsolute:
+        x: 760
+        y: 120
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: agent
+        title: Agent agent_sales
+        desc: ''
+        selected: false
+        agent_strategy_provider_name: langgenius/agent/agent
+        agent_strategy_name: FunctionCalling
+        agent_strategy_label: FunctionCalling
+        agent_parameters:
+          model:
+            type: constant
+            value:
+              provider: langgenius/openai/openai
+              name: gpt-4o
+              mode: chat
+              completion_params:
+                temperature: 0.3
+                max_tokens: 2048
+                top_p: 1
+          tools:
+            type: constant
+            value: []
+          instruction:
+            type: mixed
+            value: Pricing, plans, quotes, trials, procurement questions.
+          query:
+            type: mixed
+            value: ''
+          maximum_iterations:
+            type: constant
+            value: 6
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          window:
+            enabled: false
+            size: 10
+      height: 160
+      id: agent_sales
+      position:
+        x: 760
+        y: 290
+      positionAbsolute:
+        x: 760
+        y: 290
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: agent
+        title: Agent agent_billing
+        desc: ''
+        selected: false
+        agent_strategy_provider_name: langgenius/agent/agent
+        agent_strategy_name: FunctionCalling
+        agent_strategy_label: FunctionCalling
+        agent_parameters:
+          model:
+            type: constant
+            value:
+              provider: langgenius/openai/openai
+              name: gpt-4o
+              mode: chat
+              completion_params:
+                temperature: 0.3
+                max_tokens: 2048
+                top_p: 1
+          tools:
+            type: constant
+            value: []
+          instruction:
+            type: mixed
+            value: Invoices, refunds, payment failures, subscription changes.
+          query:
+            type: mixed
+            value: ''
+          maximum_iterations:
+            type: constant
+            value: 6
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          window:
+            enabled: false
+            size: 10
+      height: 160
+      id: agent_billing
+      position:
+        x: 760
+        y: 460
+      positionAbsolute:
+        x: 760
+        y: 460
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: agent
+        title: Agent agent_tech
+        desc: ''
+        selected: false
+        agent_strategy_provider_name: langgenius/agent/agent
+        agent_strategy_name: FunctionCalling
+        agent_strategy_label: FunctionCalling
+        agent_parameters:
+          model:
+            type: constant
+            value:
+              provider: langgenius/openai/openai
+              name: gpt-4o
+              mode: chat
+              completion_params:
+                temperature: 0.3
+                max_tokens: 2048
+                top_p: 1
+          tools:
+            type: constant
+            value: []
+          instruction:
+            type: mixed
+            value: Bugs, errors, integrations, API usage, how-to questions.
+          query:
+            type: mixed
+            value: ''
+          maximum_iterations:
+            type: constant
+            value: 6
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          window:
+            enabled: false
+            size: 10
+      height: 160
+      id: agent_tech
+      position:
+        x: 760
+        y: 630
+      positionAbsolute:
+        x: 760
+        y: 630
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: variable-aggregator
+        title: 合并回复
+        desc: ''
+        selected: false
+        output_type: string
+        variables:
+        - - agent_general
+          - text
+        - - agent_sales
+          - text
+        - - agent_billing
+          - text
+        - - agent_tech
+          - text
+        advanced_settings:
+          group_enabled: false
+          groups: []
+      height: 110
+      id: agg_reply
+      position:
+        x: 1100
+        y: 380
+      positionAbsolute:
+        x: 1100
+        y: 380
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: answer
+        title: 直接回复
+        desc: ''
+        selected: false
+        answer: '{{#agg_reply.output#}}'
+        variables: []
+      height: 105
+      id: answer
+      position:
+        x: 1420
+        y: 380
+      positionAbsolute:
+        x: 1420
+        y: 380
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    viewport:
+      x: 0
+      y: 0
+      zoom: 0.7

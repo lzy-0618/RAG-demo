@@ -8,7 +8,9 @@ import {
   getRegulationTask,
 } from '@/api/generate'
 import type { GenerationTaskOut } from '@/api/generate'
-import { downloadGeneratedFile } from '@/api/template'
+import { downloadAuthedFile } from '@/api/download'
+import FlowSteps from '@/components/FlowSteps.vue'
+import RiskNote from '@/components/RiskNote.vue'
 
 const requirement = ref('')
 const outline = ref('')
@@ -55,11 +57,16 @@ const phaseText = computed(() => {
   }
   return t.round > 0 ? `正在按审查意见修正（第 ${t.round} 轮）…` : '正在撰写全文…'
 })
-const RISK_META: Record<string, { text: string; type: 'danger' | 'warning' | 'info' }> = {
-  high: { text: '高风险', type: 'danger' },
-  medium: { text: '中风险', type: 'warning' },
-  low: { text: '低风险', type: 'info' },
-}
+const MAIN_STEPS = ['填写需求', '生成并确认大纲', '生成全文与合规审查']
+
+/** 当前所处流程位置：已开始生成即进入第三步，仅有大纲则停在第二步 */
+const mainStep = computed(() => (task.value ? 2 : outline.value ? 1 : 0))
+
+/** 轮次编排线：首版 + 最多 max_rounds 轮修正 */
+const roundSteps = computed(() => [
+  '首版撰写',
+  ...Array.from({ length: task.value?.max_rounds ?? 0 }, (_, i) => `第 ${i + 1} 轮修正`),
+])
 
 async function onGenerateOutline() {
   if (!requirement.value.trim()) {
@@ -123,9 +130,12 @@ function stopPolling() {
 async function onDownload() {
   if (!task.value?.doc_name) return
   try {
-    await downloadGeneratedFile(task.value.doc_name)
-  } catch {
-    ElMessage.error('下载失败')
+    await downloadAuthedFile(
+      `/generate/files/${encodeURIComponent(task.value.doc_name)}`,
+      task.value.doc_name,
+    )
+  } catch (exc) {
+    ElMessage.error(exc instanceof Error ? exc.message : '下载失败')
   }
 }
 
@@ -140,22 +150,12 @@ onBeforeUnmount(stopPolling)
 </script>
 
 <template>
-  <div class="page">
+  <div class="page reveal-group">
     <el-card>
-      <template #header>
-        <div class="card-header">
-          <span>规章制度生成</span>
-          <span class="hint">需求 → 大纲（可修改）→ 全文 → 自动合规审查（不合规自动修正，最多 3 轮）</span>
-        </div>
-      </template>
+      <!-- 页标题由外壳的文书头承担；这里用编排线直接表达流程 -->
+      <FlowSteps :steps="MAIN_STEPS" :active="mainStep" class="flow-block" />
 
-      <el-steps :active="task?.status === 'completed' ? 3 : outline ? 2 : 1" simple class="steps">
-        <el-step title="填写需求" />
-        <el-step title="生成并确认大纲" />
-        <el-step title="生成全文与合规审查" />
-      </el-steps>
-
-      <el-form label-position="top">
+      <el-form label-position="top" class="form">
         <el-form-item label="内容需求">
           <el-input
             v-model="requirement"
@@ -170,7 +170,6 @@ onBeforeUnmount(stopPolling)
             type="primary"
             :loading="submitting || running"
             :disabled="!outline || running"
-            class="ml"
             @click="onGenerateDocument"
           >
             {{ running ? '生成中…' : '确认大纲并生成全文' }}
@@ -184,14 +183,12 @@ onBeforeUnmount(stopPolling)
     </el-card>
 
     <el-card v-if="task" class="mt">
-      <template #header>
-        <div class="card-header">
-          <span>生成进度</span>
-          <span class="hint">
-            {{ phaseText }} · 修正轮次 {{ task.round }}/{{ task.max_rounds }}
-          </span>
-        </div>
-      </template>
+      <div class="sec-bar">
+        <h2 class="sec-head flush">生成进度</h2>
+        <span class="hint u-num">
+          {{ phaseText }} · 修正轮次 {{ task.round }}/{{ task.max_rounds }}
+        </span>
+      </div>
 
       <!-- 统一使用一个进度条：按轮次推进（每完成一轮 +25%），撰写阶段停在当前单元起点 -->
       <el-progress
@@ -199,43 +196,53 @@ onBeforeUnmount(stopPolling)
         :status="task.status === 'failed' ? 'exception' : undefined"
       />
 
-      <el-steps :active="task.round + (phase === 'done' ? 1 : 0)" simple class="sub-steps">
-        <el-step title="首版撰写" />
-        <el-step v-for="r in task.max_rounds" :key="r" :title="`第 ${r} 轮修正`" />
-      </el-steps>
+      <FlowSteps
+        :steps="roundSteps"
+        :active="task.round + (phase === 'done' ? 1 : 0)"
+        class="rounds"
+      />
     </el-card>
 
     <el-card v-if="task?.status === 'completed'" class="mt">
-      <template #header>
-        <div class="card-header">
-          <span>生成结果</span>
-          <el-tag :type="task.is_compliant ? 'success' : 'danger'" size="small">
-            {{ task.is_compliant ? '合规审查通过' : '仍有冲突，需人工复核' }}
-          </el-tag>
-        </div>
-      </template>
-
-      <el-alert :title="task.summary || ''" :type="task.is_compliant ? 'success' : 'warning'" :closable="false" />
-
-      <div v-if="task.review?.risks?.length" class="risks">
-        <div v-for="(risk, i) in task.review.risks" :key="i" class="risk">
-          <el-tag :type="RISK_META[risk.risk_level]?.type ?? 'info'" size="small">
-            {{ RISK_META[risk.risk_level]?.text ?? risk.risk_level }}
-          </el-tag>
-          <div class="clause">{{ risk.clause }}</div>
-          <div v-for="(v, vi) in risk.violations" :key="vi" class="violation">
-            {{ v.law_name }}<template v-if="v.article"> · {{ v.article }}</template>：{{ v.description }}
-          </div>
-          <div v-if="risk.suggestion" class="suggestion">建议：{{ risk.suggestion }}</div>
-        </div>
+      <div class="sec-bar">
+        <h2 class="sec-head flush">生成结果</h2>
+        <span class="verdict" :class="task.is_compliant ? 'is-clear' : 'is-risk'">
+          <span class="verdict-dot" aria-hidden="true" />
+          {{ task.is_compliant ? '合规审查通过' : '仍有冲突，需人工复核' }}
+        </span>
       </div>
 
-      <el-divider content-position="left">正文（{{ task.sections.length }} 章）</el-divider>
+      <el-alert
+        :title="task.summary || ''"
+        :type="task.is_compliant ? 'success' : 'warning'"
+        :closable="false"
+      />
+
+      <!-- 审查发现的冲突按批注卡呈现，与审查页同一套语言 -->
+      <RiskNote
+        v-for="(risk, i) in task.review?.risks ?? []"
+        :key="i"
+        :index="i"
+        :level="risk.risk_level"
+        :location="risk.location"
+        :clause="risk.clause"
+        :violations="risk.violations"
+        :suggestion="risk.suggestion"
+      />
+
+      <div class="sec-bar sections-bar">
+        <h2 class="sec-head flush">正文</h2>
+        <span class="hint u-num">{{ task.sections.length }} 章</span>
+      </div>
+
       <div class="sections">
-        <div v-for="(s, i) in task.sections" :key="i" class="section">
-          <div class="section-title">{{ s.title }}</div>
-          <div class="section-content">{{ s.content }}</div>
-        </div>
+        <article v-for="(s, i) in task.sections" :key="i" class="section">
+          <h3 class="section-title">
+            <span class="section-no u-num">{{ String(i + 1).padStart(2, '0') }}</span>
+            {{ s.title }}
+          </h3>
+          <p class="section-content">{{ s.content }}</p>
+        </article>
       </div>
 
       <el-button type="primary" class="mt" @click="onDownload">下载 Word 文档</el-button>
@@ -245,70 +252,71 @@ onBeforeUnmount(stopPolling)
 
 <style scoped>
 .page {
-  padding: 16px;
   height: 100%;
+  padding: var(--space-5);
   overflow-y: auto;
 }
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+
+/* 区段头、状态标记、批注卡是跨页面复用版式，统一定义在 styles/patterns.css */
+.flow-block {
+  margin-bottom: var(--space-5);
 }
-.hint {
-  color: #909399;
-  font-size: 13px;
+
+.form {
+  margin-top: 0;
 }
-.steps {
-  margin-bottom: 16px;
+
+.rounds {
+  margin-top: var(--space-4);
 }
-.sub-steps {
-  margin-top: 12px;
-}
-.ml {
-  margin-left: 10px;
-}
+
 .mt {
-  margin-top: 16px;
+  margin-top: var(--space-5);
 }
-.risks {
-  margin-top: 14px;
+
+.sections-bar {
+  margin-top: var(--space-6);
 }
-.risk {
-  padding: 10px 12px;
-  border: 1px solid #f0f0f0;
-  border-left: 3px solid #f56c6c;
-  border-radius: 6px;
-  margin-bottom: 10px;
-}
-.clause {
-  margin: 6px 0;
-  line-height: 1.6;
-  white-space: pre-wrap;
-}
-.violation {
-  color: #606266;
-  font-size: 13px;
-  line-height: 1.7;
-}
-.suggestion {
-  margin-top: 4px;
-  font-size: 13px;
-  color: #303133;
-}
+
 .sections {
-  max-height: 420px;
+  max-height: 46vh;
   overflow-y: auto;
 }
+
 .section {
-  margin-bottom: 12px;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--rule);
 }
+
+.section:last-child {
+  border-bottom: none;
+}
+
 .section-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-serif);
+  font-size: var(--fs-md);
   font-weight: 600;
-  margin-bottom: 4px;
+  letter-spacing: -0.01em;
+  line-height: 1.45;
+  color: var(--ink);
 }
+
+.section-no {
+  font-size: var(--fs-2xs);
+  font-weight: 400;
+  color: var(--muted);
+}
+
 .section-content {
-  color: #303133;
-  line-height: 1.7;
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: var(--lh-base);
+  color: var(--ink);
   white-space: pre-wrap;
+  word-break: break-word;
 }
 </style>

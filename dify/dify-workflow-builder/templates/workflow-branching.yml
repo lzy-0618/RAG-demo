@@ -1,0 +1,466 @@
+app:
+  description: Classify a request with an LLM, branch on the result, and merge both branches back together.
+  icon: 🔀
+  icon_type: emoji
+  icon_background: '#E0F2FE'
+  mode: workflow
+  name: Branching Workflow
+  use_icon_as_answer_icon: false
+dependencies: []
+kind: app
+version: 0.7.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      enabled: false
+      allowed_file_extensions: []
+      allowed_file_types: []
+      allowed_file_upload_methods: []
+      number_limits: 3
+      fileUploadConfig:
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        image_file_size_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+    opening_statement: ''
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: llm
+      id: edge-start-llm_classify
+      source: start
+      sourceHandle: source
+      target: llm_classify
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: code
+      id: edge-llm_classify-code_parse
+      source: llm_classify
+      sourceHandle: source
+      target: code_parse
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: if-else
+      id: edge-code_parse-if_route
+      source: code_parse
+      sourceHandle: source
+      target: if_route
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: llm
+      id: edge-route-premium
+      source: if_route
+      sourceHandle: premium
+      target: llm_premium
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: if-else
+        targetType: llm
+      id: edge-route-standard
+      source: if_route
+      sourceHandle: 'false'
+      target: llm_standard
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: variable-aggregator
+      id: edge-premium-agg
+      source: llm_premium
+      sourceHandle: source
+      target: agg_reply
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: variable-aggregator
+      id: edge-standard-agg
+      source: llm_standard
+      sourceHandle: source
+      target: agg_reply
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: variable-aggregator
+        targetType: end
+      id: edge-agg_reply-end
+      source: agg_reply
+      sourceHandle: source
+      target: end
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        type: start
+        title: 开始
+        desc: ''
+        selected: false
+        variables:
+        - variable: request
+          label: Customer request
+          type: paragraph
+          required: true
+          max_length: null
+          options: []
+      height: 90
+      id: start
+      position:
+        x: 80
+        y: 300
+      positionAbsolute:
+        x: 80
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: llm
+        title: LLM 分类
+        desc: ''
+        selected: false
+        model:
+          provider: langgenius/openai/openai
+          name: gpt-4o-mini
+          mode: chat
+          completion_params:
+            temperature: 0.1
+            max_tokens: 256
+            top_p: 1
+            response_format: json_object
+        prompt_template:
+        - role: system
+          text: 'Classify the customer request into exactly one route.
+
+            premium = enterprise contract, SLA, or security review.
+
+            standard = everything else.
+
+            Reply with JSON only: {"route": "premium"|"standard", "reason": "<10 words>"}'
+        - role: user
+          text: '{{#start.request#}}'
+        context:
+          enabled: false
+          variable_selector: []
+        vision:
+          enabled: false
+          configs:
+            variable_selector: []
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          window:
+            enabled: false
+            size: 10
+        structured_output:
+          enabled: false
+        reasoning_format: tagged
+        retry_config:
+          enabled: false
+          exponential_backoff:
+            enabled: false
+            max_interval: 10000
+            multiplier: 2
+          max_retries: 1
+          retry_interval: 1000
+      height: 200
+      id: llm_classify
+      position:
+        x: 400
+        y: 300
+      positionAbsolute:
+        x: 400
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: code
+        title: 解析分类结果
+        desc: ''
+        selected: false
+        code: "import json\nimport re\n\n\nTHINK_RE = re.compile(r\"<think>.*?</think>\", re.DOTALL | re.IGNORECASE)\n\n\ndef _extract(text: str) -> dict:\n    \"\"\"Pull the last JSON object that mentions `route` out of the model output.\n\n    Scanning backwards matters: a reasoning model often echoes a sample object in\n    its thinking block, and taking the first brace pair would grab that example\n    instead of the real answer.\n    \"\"\"\n    text = THINK_RE.sub(\"\", text or \"\")\n    starts = [i for i, ch in enumerate(text) if ch == \"{\"]\n    for start in reversed(starts):\n        depth, in_str, escape = 0, False, False\n        for i in range(start, len(text)):\n            ch = text[i]\n            if in_str:\n                if escape:\n                    escape = False\n                elif ch == \"\\\\\":\n                    escape = True\n                elif ch == '\"':\n                    in_str = False\n                continue\n            if ch == '\"':\n                in_str = True\n            elif ch == \"{\":\n                depth += 1\n            elif ch == \"}\":\n                depth -= 1\n                if depth == 0:\n                    try:\n                        data = json.loads(text[start:i + 1])\n                    except Exception:\n                        break\n                    if isinstance(data, dict) and \"route\" in data:\n                        return data\n                    break\n    return {}\n\n\ndef main(llm_output: str) -> dict:\n    data = _extract(llm_output)\n    route = str(data.get(\"route\") or \"\").strip().lower()\n    if route not in (\"premium\", \"standard\"):\n        route = \"standard\"\n    return {\"route\": route, \"reason\": str(data.get(\"reason\") or \"\")}\n"
+        code_language: python3
+        variables:
+        - variable: llm_output
+          value_selector:
+          - llm_classify
+          - text
+        outputs:
+          route:
+            children: null
+            type: string
+          reason:
+            children: null
+            type: string
+      height: 160
+      id: code_parse
+      position:
+        x: 720
+        y: 300
+      positionAbsolute:
+        x: 720
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: if-else
+        title: 是否高优先级
+        desc: ''
+        selected: false
+        logical_operator: and
+        cases:
+        - case_id: premium
+          id: premium
+          logical_operator: and
+          conditions:
+          - id: cond-code_parse-route
+            varType: string
+            variable_selector:
+            - code_parse
+            - route
+            comparison_operator: is
+            value: premium
+      height: 140
+      id: if_route
+      position:
+        x: 1040
+        y: 300
+      positionAbsolute:
+        x: 1040
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: llm
+        title: LLM 高优先级回复
+        desc: ''
+        selected: false
+        model:
+          provider: langgenius/openai/openai
+          name: gpt-4o
+          mode: chat
+          completion_params:
+            temperature: 0.3
+            max_tokens: 1200
+            top_p: 1
+        prompt_template:
+        - role: system
+          text: You are a senior account manager. Draft a same-day response with an owner and a deadline.
+        - role: user
+          text: 'Request:
+
+            {{#start.request#}}
+
+
+            Routing reason: {{#code_parse.reason#}}'
+        context:
+          enabled: false
+          variable_selector: []
+        vision:
+          enabled: false
+          configs:
+            variable_selector: []
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          window:
+            enabled: false
+            size: 10
+        structured_output:
+          enabled: false
+        reasoning_format: tagged
+        retry_config:
+          enabled: false
+          exponential_backoff:
+            enabled: false
+            max_interval: 10000
+            multiplier: 2
+          max_retries: 1
+          retry_interval: 1000
+      height: 200
+      id: llm_premium
+      position:
+        x: 1360
+        y: 200
+      positionAbsolute:
+        x: 1360
+        y: 200
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: llm
+        title: LLM 常规回复
+        desc: ''
+        selected: false
+        model:
+          provider: langgenius/openai/openai
+          name: gpt-4o-mini
+          mode: chat
+          completion_params:
+            temperature: 0.5
+            max_tokens: 800
+            top_p: 1
+        prompt_template:
+        - role: system
+          text: You are a support agent. Draft a helpful first response and list any missing information.
+        - role: user
+          text: 'Request:
+
+            {{#start.request#}}'
+        context:
+          enabled: false
+          variable_selector: []
+        vision:
+          enabled: false
+          configs:
+            variable_selector: []
+        memory:
+          query_prompt_template: '{{#sys.query#}}'
+          window:
+            enabled: false
+            size: 10
+        structured_output:
+          enabled: false
+        reasoning_format: tagged
+        retry_config:
+          enabled: false
+          exponential_backoff:
+            enabled: false
+            max_interval: 10000
+            multiplier: 2
+          max_retries: 1
+          retry_interval: 1000
+      height: 200
+      id: llm_standard
+      position:
+        x: 1360
+        y: 440
+      positionAbsolute:
+        x: 1360
+        y: 440
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: variable-aggregator
+        title: 合并回复
+        desc: ''
+        selected: false
+        output_type: string
+        variables:
+        - - llm_premium
+          - text
+        - - llm_standard
+          - text
+        advanced_settings:
+          group_enabled: false
+          groups: []
+      height: 110
+      id: agg_reply
+      position:
+        x: 1700
+        y: 300
+      positionAbsolute:
+        x: 1700
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    - data:
+        type: end
+        title: 结束
+        desc: ''
+        selected: false
+        outputs:
+        - variable: reply
+          value_type: string
+          value_selector:
+          - agg_reply
+          - output
+      height: 140
+      id: end
+      position:
+        x: 2020
+        y: 300
+      positionAbsolute:
+        x: 2020
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 244
+    viewport:
+      x: 0
+      y: 0
+      zoom: 0.7

@@ -10,6 +10,7 @@
 | 制度审查（需求③） | Workflow | `dsl/制度审查.yml` | ✅ 已定稿 · 已联调 |
 | 合规咨询（需求④） | Chatflow | `dsl/合规咨询.yml` | ✅ 已定稿 · 已联调 |
 | 规章制度生成（需求⑧） | Workflow | `dsl/规章制度生成.yml` | ✅ 已定稿 · 已联调 |
+| 合同模板结构化（需求⑥） | Workflow | `dsl/合同模板结构化.yml` | ✅ 已定稿 · 已联调 |
 | 审查汇总（②③长文档） | — | 无（后端代码实现合并去重） | ❌ 不建 |
 
 ### 联调状态（2026-09-13 验证）
@@ -52,7 +53,19 @@ cd backend && .venv/bin/python ../dify/scripts/smoke_test.py
 bash dify/scripts/validate.sh          # 默认容器 docker-api-1
 ```
 
-脚本用 Dify 容器内**自身的 pydantic 节点模型**逐节点校验，能发现上面所有问题。注意：dify-workflow-builder 技能自带的 `scripts/validate_dsl.py` 校验的是它自己的简化格式（要求顶层 `type: start`），**对 Dify 1.17 的真实格式会误报**，本项目以 `dify/scripts/validate.sh` 为准。
+脚本用 Dify 容器内**自身的 pydantic 节点模型**逐节点校验，能发现上面所有问题。
+
+> **补充（技能已升级）**：`dify/dify-workflow-builder/` 是 dify-workflow-builder 技能的完整副本，
+> 已按 Dify 1.17 真实导出格式重写。它的 `scripts/validate_dsl.py` + `validate.sh` 同样是
+> **在容器内用 Dify 自身的 pydantic 节点模型**逐节点校验（等价于本项目的 `dify/scripts/validate.sh`），
+> 并额外做信封/语法层检查（顶层 `type: custom`、`kind: app`、边的 handle、变量引用解析、
+> 环境变量用 `name` 而非 `variable`、聚合器二元数组、密钥扫描、不可达节点告警等）。
+> 早先「技能自带校验器对 1.17 会误报」的结论已不成立。
+>
+> 新建 DSL 时可直接用该技能：`templates/` 下 9 个模板与 `examples/` 下 3 个示例均通过校验，
+> 可用 `scripts/generate_dsl.py` 复制改写，用 `scripts/dify_dsl.py` 组合新图，用
+> `render_flow.py` 出流程图。踩坑清单见 `dify/dify-workflow-builder/references/pitfalls.md`。
+> 本项目自身的 `dify/scripts/validate.sh` 仍然有效，两者可互为交叉验证。
 
 ---
 
@@ -304,3 +317,83 @@ while True:
 - **首次全文**：`mode=document` + 大纲（`previous_sections` 留空）→ 期望 `sections_json` 为合法 JSON 且章节齐全。
 - **修正模式**：`previous_sections` = 上一版全文、`review_conflicts` = 一条真实冲突 → 期望仅相关条款被修改，其余内容与上一版基本一致，且不再触发同一冲突。
 - **兜底解析**：令 LLM 输出非 JSON → 期望降级为单章节 + `parse_error="true"`，仍能落盘。
+
+---
+
+## 合同模板结构化 Workflow/Agent
+
+> 对应需求⑥（合同模板库）：模板导入时智能识别待填字段。后端先把 `.docx` 扫描成「带锚点的文档结构大纲」+「候选空位清单」，交给本应用输出结构化字段清单 JSON，前端据此生成填充表单，后端据此渲染 docxtpl 占位符。
+
+### 编排
+
+```
+Start(doc_outline, candidates_json, template_name)
+  → LLM 识别待填字段（通读大纲 + 候选清单，temperature 0.1 / response_format=json_object）
+  → Code 兜底解析与规整（剥 <think> → 从后往前取含 fields 的最后一个合法 JSON → 规整 key/type/anchor）
+  → End(fields_json, parse_error)
+```
+
+共 **4 节点 / 3 边**（`start` / `llm` / `code` / `end`），单链路无分支、无聚合器。
+
+### 变量表
+
+| 变量 | 方向 | 类型 | 说明 |
+| --- | --- | --- | --- |
+| `doc_outline` | Start 输入 | paragraph | 带锚点编号的文档结构文本，如 `[p0] 钢材采购合同` / `[p1] 甲方（采购方）：__________`（必填） |
+| `candidates_json` | Start 输入 | paragraph | 后端规则扫描出的候选空位清单 JSON 字符串，可为 `[]` |
+| `template_name` | Start 输入 | paragraph | 模板名称（必填） |
+| `llm_output` | LLM 输出 | string | 模型原始输出（仅内部，供 Code 解析） |
+| `fields_json` | Code 输出 | string | 字段清单 JSON 字符串 |
+| `parse_error` | Code 输出 | string | `"true"` / `"false"`；后端据此把本次识别标记为失败并提示人工复核 |
+
+**End 输出**（后端 `run_workflow` 的 `outputs`）：
+
+```json
+{
+  "fields_json": "{\"contract_type\":\"采购\",\"fields\":[{\"key\":\"party_a_name\",\"label\":\"甲方名称\",\"type\":\"text\",\"required\":true,\"anchor\":\"p1\",\"default\":\"\",\"options\":[],\"confidence\":0.96,\"reason\":\"『甲方（采购方）：』后为空\"}],\"ignored\":[{\"anchor\":\"p5\",\"reason\":\"已有固定条款正文\"}],\"notes\":\"识别到 8 个待填字段\"}",
+  "parse_error": "false"
+}
+```
+
+**Code 节点的硬约束（后端依赖，不可放宽）**：
+
+- `key` 必须是合法 Jinja 标识符 `^[A-Za-z_][A-Za-z0-9_]*$`（英文/拼音+下划线）；模型若输出中文/空格键，Code 会兜底改写为 `field_N`，保证不产生非法占位符。
+- `type` 只能取 `text` / `textarea` / `date` / `number` / `select`；别名（如 `string`/`enum`）会被归一化，`select` 无 `options` 时自动降为 `text`。
+- `anchor` 必须来自输入：Code 从 `doc_outline` 的 `[pN]` 与 `candidates_json` 中收集合法锚点集合，集合外的锚点置空，杜绝编造。
+
+### 关于 Agent 节点降级为 LLM 节点
+
+用户要求用 Agent 节点承担识别。本机 Dify 1.17.0 容器内**确实存在** Agent 节点模型（`core/workflow/nodes/agent/entities.py::AgentNodeData`，`data.type = "agent"`），但其 DSL 字段结构（`agent_strategy_*` / `agent_parameters` / 插件 `plugin_unique_identifier` 等）与项目现有 4 个 DSL 差异较大，且依赖由插件提供的 agent 策略（当前环境无法确认已安装可用策略），硬写 Agent 节点导入后会成为坏节点。项目校验脚本 `dify/scripts/validate_dsl.py` 原先**只注册了 8 种节点模型、未注册 `agent`**，含 Agent 节点的 DSL 必然报 `FAIL 节点 xxx: 未知 data.type: agent`——该缺口已修复（`agent` 已注册，并注明其插件依赖），后续可随时切回 Agent 节点。
+
+> **联调结论（2026-09-14）**：LLM 节点形态已实测通过。对一份纯下划线填空、不含任何 `{{ }}` 的合同模板，2 秒返回 5 个字段（含中文标签、控件类型、必填标记、置信度与判断理由），并正确忽略标题与固定条款；下游"复核确认 → 必填拦截 → 生成 → 产物校验"全链路通过。
+> **注意**：提示词只要求输出 `anchor`（不含 `candidate_id`），后端已按锚点回退解析候选空位；如果希望同一段落里多个填空的定位更精确，可在提示词中补上 `candidate_id` 输出。
+
+因此按任务约定「校验无法通过则降级」，本应用**使用 LLM 节点承载识别**，输入输出契约与 Agent 方案完全一致（同为 3 入 2 出）。若后续 `validate_dsl.py` 补充 `agent` 节点模型，可直接把 `llm_struct` 节点替换为 Agent 节点（`agent_strategy_provider_name: langgenius/agent/agent` + `agent_strategy_name: function_calling`），Code / End 节点无需改动。
+
+### 模型与参数
+
+`name: deepseek-v4-flash`、`thinking: false`、`temperature: 0.1`、`max_tokens: 4096`、`response_format: json_object`（`structured_output` 保持关闭，沿用项目既有 JSON 约束方式）。
+
+### 部署步骤
+
+1. Dify 控制台 → 创建应用 → **导入 DSL 文件** → 选择 `dsl/合同模板结构化.yml`。
+2. 确认 DeepSeek 供应商已配置 API Key（LLM 节点模型为 `deepseek-v4-flash`，思考模式已关闭）。
+3. 本应用**不检索知识库**，无需绑定任何 dataset（`context.enabled = false`）。
+4. 发布应用 → 「API 访问」生成 API Secret → 填入后端 `backend/.env` 的 `DIFY_TEMPLATE_STRUCTURE_APP_KEY`。
+5. 后端上传 `.docx` 后：扫描空位 → 拼装 `doc_outline` / `candidates_json` / `template_name` → 调用本应用 → 用 `fields_json` 生成填充表单与 docxtpl 占位符；`parse_error="true"` 时提示人工复核。
+
+### 验证用例
+
+- **纯下划线填空模板**：`doc_outline` 含 `[p1] 甲方（采购方）：__________`、`[p2] 乙方（供货方）：__________`、`[p9] 签订日期：____年__月__日` → 期望 `fields` 覆盖甲乙方名称与签订日期，日期字段 `type="date"`，各 `anchor` 正确指向 p1/p2/p9。
+- **无占位符模板**：`doc_outline` 全为固定条款正文（如「第一条 本协议自双方签字之日起生效」），`candidates_json="[]"` → 期望 `fields=[]`、`parse_error="false"`、`notes` 说明无需填写字段（不臆造字段）。
+- **候选误报**：`candidates_json` 混入一条实为固定条款的行 → 期望该条进入 `ignored` 并给出原因，不出现在 `fields`。
+- **非法键/锚点兜底**：令模型故意返回中文 `key` 与不存在的 `anchor` → 期望 `key` 被改写为 `field_N`、`anchor` 置空，输出仍是合法 JSON。
+- **兜底解析**：令模型输出非 JSON（如「抱歉，我无法完成」）→ 期望 `parse_error="true"`、`fields=[]`，流程不报错。
+
+### 校验
+
+```bash
+bash dify/scripts/validate.sh
+```
+
+实测结果：本应用 `节点数: 4 | 边数: 3 | start: 1 | end: 1`，与既有 4 个应用一并**全部通过**（exit 0）。
