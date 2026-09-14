@@ -75,6 +75,47 @@ uvicorn app.main:app --reload --port 8000
 > 已知差异：`POST /chat`（阻塞式）返回的 `metadata.retriever_resources` 为空，流式 `/chat/stream` 的
 > `sources` 事件正常（前端使用流式）。阻塞式接口当前未被前端使用，待后续排查。
 
+## 模板库与生成（需求 ⑥⑦⑧，已实现）
+
+**合同模板库（⑥）**：模板为含 `{{ 变量 }}` 占位符的 .docx，导入时用 docxtpl 解析占位变量并缓存，
+前端据此动态渲染填报表单。文件存 `templates/` 目录（与 uploads/、outputs/ 分开）。
+
+| 接口 | 说明 |
+| --- | --- |
+| `GET /api/v1/templates` | 列表（分类过滤 + 分页），返回占位变量与全部分类 |
+| `POST /api/v1/templates` | 导入模板（multipart：`file` + `name`/`category`/`description`） |
+| `PATCH /api/v1/templates/{id}` | 修改模板元信息 |
+| `GET /api/v1/templates/{id}/download` | 下载模板原文件 |
+| `DELETE /api/v1/templates/{id}` | 删除模板（含文件） |
+
+**合同生成（⑦）**：`POST /api/v1/generate/contract`（`template_id` + `variables`）→ docxtpl 确定性填充，
+未填变量按空值处理并通过 `missing_variables` 返回提示。**该链路不调用大模型**。
+
+**规章制度生成（⑧）**：两段式 + 生成后自动合规审查与修正循环。
+
+| 接口 | 说明 |
+| --- | --- |
+| `POST /api/v1/generate/regulation/outline` | 第一段：按需求生成大纲（同步返回，可编辑确认） |
+| `POST /api/v1/generate/regulation/document` | 第二段：生成全文 + 自动审查（后台任务，返回 task_id） |
+| `GET /api/v1/generate/regulation/{task_id}` | 轮询进度与结果（含审查冲突清单、章节、下载地址） |
+| `GET/DELETE /api/v1/generate/regulation` | 生成历史 / 删除 |
+| `GET /api/v1/generate/files/{file_name}` | 下载生成产物（仅限 outputs/ 内文件名，防目录穿越） |
+
+修正循环（循环在后端，Dify 只做单轮生成）：
+
+```
+生成首版 → 逐块审查（复用审查管线）→ 合规则结束
+        → 不合规：把「冲突清单(≤15 条) + 上一版全文」回传重新生成 → 再审查，最多 3 轮
+```
+
+- 回传**必须带 `previous_sections`**：只给冲突清单会让模型整篇重写、可能引入新冲突导致循环不收敛；
+- `round` 为已完成的修正轮次（0=首版），`review_round` 为当前轮次审查的第几次；
+- 生成产物用 python-docx 程序化排版（`build_docx_from_sections`），无固定模板；
+- 生成阶段挂「法规 + 现行制度」检索作写作参照，从源头降低冲突率。
+
+> 三种产物目录约定：`uploads/`（知识库文档与待审查文件）、`templates/`（合同模板）、`outputs/`（生成产物），
+> 均已 gitignore。
+
 ## 知识库管理（需求 ①⑨，Phase 1 已实现）
 
 | 接口 | 说明 |

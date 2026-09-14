@@ -34,10 +34,16 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '制度审查' },
   },
   {
-    path: '/generate',
-    name: 'generate',
-    component: () => import('@/views/GenerateView.vue'),
-    meta: { title: '文档生成' },
+    path: '/generate/contract',
+    name: 'contractGenerate',
+    component: () => import('@/views/ContractGenerateView.vue'),
+    meta: { title: '合同生成' },
+  },
+  {
+    path: '/generate/regulation',
+    name: 'regulationGenerate',
+    component: () => import('@/views/RegulationGenerateView.vue'),
+    meta: { title: '规章制度生成' },
   },
   {
     path: '/templates',

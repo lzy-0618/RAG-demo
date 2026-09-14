@@ -27,8 +27,9 @@ function onLogout() {
         <el-menu-item index="/knowledge">知识库管理</el-menu-item>
         <el-menu-item index="/review">合同审查</el-menu-item>
         <el-menu-item index="/review/regulation">制度审查</el-menu-item>
-        <el-menu-item index="/generate">文档生成</el-menu-item>
         <el-menu-item index="/templates">合同模板库</el-menu-item>
+        <el-menu-item index="/generate/contract">合同生成</el-menu-item>
+        <el-menu-item index="/generate/regulation">规章制度生成</el-menu-item>
       </el-menu>
     </el-aside>
 

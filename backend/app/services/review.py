@@ -163,6 +163,54 @@ def merge_risks(chunks: list[dict], review_type: str) -> list[dict]:
     return merged
 
 
+async def review_text(
+    text: str, review_type: str, user: str = "review", on_progress=None
+) -> dict:
+    """对一段文本执行完整审查（解析切块 → 逐块审查 → 合并）。
+
+    供审查任务与「规章制度生成后的自动审查」共用，避免重复实现块级控制。
+    on_progress(completed, total, failed) 用于汇报进度（同步回调）。
+    """
+    parsed = document_parser.merge_short_document(document_parser.parse_text(text))
+    if not parsed.chunks:
+        return {
+            "is_compliant": True,
+            "summary": "文档内容为空，未发现可审查条款。",
+            "total_chunks": 0,
+            "failed_chunks": 0,
+            "risks": [],
+        }
+
+    api_key = review_app_key(review_type)
+    semaphore = asyncio.Semaphore(CHUNK_CONCURRENCY)
+    tasks = [
+        asyncio.create_task(_review_chunk(semaphore, api_key, chunk, user))
+        for chunk in parsed.chunks
+    ]
+
+    results: list[dict] = []
+    completed = failed = 0
+    for coro in asyncio.as_completed(tasks):
+        item = await coro
+        results.append(item)
+        if item["failed"]:
+            failed += 1
+        else:
+            completed += 1
+        if on_progress:
+            on_progress(completed, len(parsed.chunks), failed)
+
+    results.sort(key=lambda item: item.get("chunk_index") or 0)
+    risks = merge_risks(results, review_type)
+    return {
+        "is_compliant": not risks and failed == 0,
+        "summary": build_summary(risks, len(parsed.chunks), failed),
+        "total_chunks": len(parsed.chunks),
+        "failed_chunks": failed,
+        "risks": risks,
+    }
+
+
 def build_summary(risks: list[dict], total_chunks: int, failed_chunks: int) -> str:
     """生成整体审查结论（代码模板生成，不额外调 LLM）。"""
     if not risks:

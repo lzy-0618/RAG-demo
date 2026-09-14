@@ -2,6 +2,7 @@
 from app.models.base import Base
 from app.models.document import Document
 from app.models.feedback import CorrectionFeedback
+from app.models.generation import GenerationTask
 from app.models.review import ReviewTask
 from app.models.template import ContractTemplate
 from app.models.user import User
@@ -13,4 +14,5 @@ __all__ = [
     "ContractTemplate",
     "CorrectionFeedback",
     "ReviewTask",
+    "GenerationTask",
 ]

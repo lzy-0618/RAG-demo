@@ -57,6 +57,9 @@ class Settings(BaseSettings):
 
     # 文件上传
     UPLOAD_DIR: str = "uploads"
+    # 合同模板目录（需求⑥）与生成产物目录（需求⑦⑧）与上传目录分开
+    TEMPLATE_DIR: str = "templates"
+    OUTPUT_DIR: str = "outputs"
     MAX_UPLOAD_SIZE_MB: int = 100
 
 
