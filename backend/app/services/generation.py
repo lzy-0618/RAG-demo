@@ -235,10 +235,11 @@ async def run_regulation_task(task_id: int) -> None:
             _update(db, task, sections_json=json.dumps({"sections": sections}, ensure_ascii=False))
 
         # 落 Word（python-docx 程序化排版，无固定模板）
+        # 注意：不把用户的需求提示词写进文档，文档只包含规章制度正文（章节标题 + 条款）
         output_dir = word_generator.ensure_output_dir(settings.OUTPUT_DIR)
         doc_name = word_generator.safe_filename(f"规章制度_{task.requirement[:20]}")
         doc_path = str(output_dir / doc_name)
-        word_generator.build_docx_from_sections(sections, doc_path, title=task.requirement[:40])
+        word_generator.build_docx_from_sections(sections, doc_path)
 
         _update(
             db,

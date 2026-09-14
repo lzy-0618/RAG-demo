@@ -23,14 +23,12 @@ const running = computed(() => task.value?.status === 'pending' || task.value?.s
 /**
  * 整体进度按「轮次」推进，让用户对长流程有连续的体感：
  * 首版 + 最多 max_rounds 轮修正视为 (max_rounds + 1) 个单元，每完成一轮推进一个单元。
- * - 撰写/修正阶段（phase=generating）：单元内的细粒度不可知，用动效进度条表示进行中；
+ * - 撰写/修正阶段（phase=generating）：细粒度不可知，进度停在当前单元起点（文案提示进行中）；
  * - 合规审查阶段（phase=reviewing）：单元内按已审查块数占比推进。
  * 例如 max_rounds=3 时：首版写作 0~25% → 第 1 轮审查 → 25~50% → 第 2 轮 → 50~75% → 第 3 轮 → 100%。
  */
 const unit = computed(() => 100 / ((task.value?.max_rounds ?? 3) + 1))
 const phase = computed(() => task.value?.phase ?? 'generating')
-const isWriting = computed(() => running.value && phase.value === 'generating')
-
 const percentage = computed(() => {
   const t = task.value
   if (!t) return 0
@@ -195,12 +193,8 @@ onBeforeUnmount(stopPolling)
         </div>
       </template>
 
-      <!-- 撰写/修正阶段：细粒度不可知，用动效条表示「进行中」，避免进度条长时间停在 0 -->
-      <div v-if="isWriting" class="writing-bar">
-        <div class="writing-fill" />
-      </div>
+      <!-- 统一使用一个进度条：按轮次推进（每完成一轮 +25%），撰写阶段停在当前单元起点 -->
       <el-progress
-        v-else
         :percentage="percentage"
         :status="task.status === 'failed' ? 'exception' : undefined"
       />
@@ -266,34 +260,6 @@ onBeforeUnmount(stopPolling)
 }
 .steps {
   margin-bottom: 16px;
-}
-/* 撰写/修正阶段的动效进度条：斜纹循环滑动，表示「进行中且耗时不可预估」 */
-.writing-bar {
-  height: 6px;
-  border-radius: 3px;
-  background: #ebeef5;
-  overflow: hidden;
-}
-.writing-fill {
-  height: 100%;
-  width: 40%;
-  border-radius: 3px;
-  background: repeating-linear-gradient(
-    115deg,
-    #a0cfff 0,
-    #a0cfff 10px,
-    #409eff 10px,
-    #409eff 20px
-  );
-  animation: writing-slide 1.2s linear infinite;
-}
-@keyframes writing-slide {
-  from {
-    transform: translateX(-40%);
-  }
-  to {
-    transform: translateX(250%);
-  }
 }
 .sub-steps {
   margin-top: 12px;
