@@ -13,6 +13,8 @@ export interface RiskItem {
 export interface GenerationTaskOut {
   id: number
   status: 'pending' | 'running' | 'completed' | 'failed' | string
+  /** 当前阶段：generating（撰写/修正全文）/ reviewing（合规审查）/ done */
+  phase: 'generating' | 'reviewing' | 'done' | string
   round: number
   max_rounds: number
   review_round: number

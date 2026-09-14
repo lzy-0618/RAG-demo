@@ -29,6 +29,11 @@ MODE_DOCUMENT = "document"
 # 回传给模型的冲突条数上限（避免噪音淹没重点）
 MAX_CONFLICTS_FEEDBACK = 15
 
+# 任务阶段（前端据此切换进度条形态：写作中=动效，审查中=确定进度）
+PHASE_GENERATING = "generating"
+PHASE_REVIEWING = "reviewing"
+PHASE_DONE = "done"
+
 
 def _api_key() -> str:
     return settings.DIFY_GENERATE_APP_KEY or settings.DIFY_API_KEY
@@ -170,7 +175,7 @@ async def run_regulation_task(task_id: int) -> None:
         task = db.get(GenerationTask, task_id)
         if task is None:
             return
-        _update(db, task, status=REVIEW_STATUS_RUNNING, error=None)
+        _update(db, task, status=REVIEW_STATUS_RUNNING, error=None, phase=PHASE_GENERATING)
         user = task.created_by or "generation"
         outline = task.outline or ""
 
@@ -180,8 +185,22 @@ async def run_regulation_task(task_id: int) -> None:
         round_no = 0
         review: dict = {}
         while True:
-            # 每轮审查：进度通过 review_round / completed_chunks 回传
-            _update(db, task, review_round=round_no + 1, completed_chunks=0, failed_chunks=0)
+            # 每轮审查：进度通过 phase / review_round / completed_chunks 回传
+            _update(
+                db,
+                task,
+                phase=PHASE_REVIEWING,
+                review_round=round_no + 1,
+                completed_chunks=0,
+                failed_chunks=0,
+            )
+
+            def on_start(total: int) -> None:
+                """解析出块数后立即回填，前端从审查一开始就能显示 i/n。"""
+                task.total_chunks = total
+                task.completed_chunks = 0
+                task.failed_chunks = 0
+                db.commit()
 
             def on_progress(completed: int, total: int, failed: int) -> None:
                 task.total_chunks = total
@@ -190,7 +209,7 @@ async def run_regulation_task(task_id: int) -> None:
                 db.commit()
 
             review = await review_service.review_text(
-                _sections_to_text(sections), REVIEW_TYPE_REGULATION, user, on_progress
+                _sections_to_text(sections), REVIEW_TYPE_REGULATION, user, on_progress, on_start
             )
             _update(
                 db,
@@ -204,7 +223,7 @@ async def run_regulation_task(task_id: int) -> None:
                 break
 
             round_no += 1
-            _update(db, task, round=round_no)
+            _update(db, task, round=round_no, phase=PHASE_GENERATING)
             sections = await _generate_document(
                 task.requirement,
                 outline,
@@ -225,12 +244,13 @@ async def run_regulation_task(task_id: int) -> None:
             db,
             task,
             status=REVIEW_STATUS_COMPLETED,
+            phase=PHASE_DONE,
             doc_path=doc_path,
             doc_name=doc_name,
         )
     except Exception as exc:  # noqa: BLE001 - 后台任务异常必须落库，否则会永远停在 running
         task = db.get(GenerationTask, task_id)
         if task is not None:
-            _update(db, task, status=REVIEW_STATUS_FAILED, error=str(exc)[:500])
+            _update(db, task, status=REVIEW_STATUS_FAILED, phase=PHASE_DONE, error=str(exc)[:500])
     finally:
         db.close()

@@ -164,14 +164,17 @@ def merge_risks(chunks: list[dict], review_type: str) -> list[dict]:
 
 
 async def review_text(
-    text: str, review_type: str, user: str = "review", on_progress=None
+    text: str, review_type: str, user: str = "review", on_progress=None, on_start=None
 ) -> dict:
     """对一段文本执行完整审查（解析切块 → 逐块审查 → 合并）。
 
     供审查任务与「规章制度生成后的自动审查」共用，避免重复实现块级控制。
+    on_start(total) 在解析完切块后立即回调（前端可提前显示总块数），
     on_progress(completed, total, failed) 用于汇报进度（同步回调）。
     """
     parsed = document_parser.merge_short_document(document_parser.parse_text(text))
+    if on_start:
+        on_start(len(parsed.chunks))
     if not parsed.chunks:
         return {
             "is_compliant": True,

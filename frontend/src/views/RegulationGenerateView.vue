@@ -19,10 +19,43 @@ const task = ref<GenerationTaskOut | null>(null)
 let pollTimer: number | undefined
 
 const running = computed(() => task.value?.status === 'pending' || task.value?.status === 'running')
-const reviewProgress = computed(() => {
+
+/**
+ * 整体进度按「轮次」推进，让用户对长流程有连续的体感：
+ * 首版 + 最多 max_rounds 轮修正视为 (max_rounds + 1) 个单元，每完成一轮推进一个单元。
+ * - 撰写/修正阶段（phase=generating）：单元内的细粒度不可知，用动效进度条表示进行中；
+ * - 合规审查阶段（phase=reviewing）：单元内按已审查块数占比推进。
+ * 例如 max_rounds=3 时：首版写作 0~25% → 第 1 轮审查 → 25~50% → 第 2 轮 → 50~75% → 第 3 轮 → 100%。
+ */
+const unit = computed(() => 100 / ((task.value?.max_rounds ?? 3) + 1))
+const phase = computed(() => task.value?.phase ?? 'generating')
+const isWriting = computed(() => running.value && phase.value === 'generating')
+
+const percentage = computed(() => {
   const t = task.value
-  if (!t?.total_chunks) return 0
-  return Math.round(((t.completed_chunks + t.failed_chunks) / t.total_chunks) * 100)
+  if (!t) return 0
+  if (t.status === 'completed') return 100
+  if (t.status === 'failed') return Math.round((t.round || 0) * unit.value)
+  const base = (t.round || 0) * unit.value
+  if (t.phase === 'reviewing' && t.total_chunks) {
+    const done = (t.completed_chunks || 0) + (t.failed_chunks || 0)
+    return Math.min(99, Math.round(base + (done / t.total_chunks) * unit.value))
+  }
+  // 生成阶段：停在当前单元的起点（配动效条表示进行中）
+  return Math.round(base)
+})
+
+/** 进度文案：区分「撰写/修正」与「审查第 N 轮」 */
+const phaseText = computed(() => {
+  const t = task.value
+  if (!t) return ''
+  if (t.status === 'completed') return '已完成'
+  if (t.status === 'failed') return '失败'
+  if (t.phase === 'reviewing') {
+    const done = (t.completed_chunks || 0) + (t.failed_chunks || 0)
+    return `第 ${t.review_round || 1} 轮合规审查中（${done}/${t.total_chunks || '?'} 块）`
+  }
+  return t.round > 0 ? `正在按审查意见修正（第 ${t.round} 轮）…` : '正在撰写全文…'
 })
 const RISK_META: Record<string, { text: string; type: 'danger' | 'warning' | 'info' }> = {
   high: { text: '高风险', type: 'danger' },
@@ -157,13 +190,25 @@ onBeforeUnmount(stopPolling)
         <div class="card-header">
           <span>生成进度</span>
           <span class="hint">
-            {{ task.status === 'completed' ? '已完成' : task.status === 'failed' ? '失败' : '进行中' }}
-            · 修正轮次 {{ task.round }}/{{ task.max_rounds }}
-            · 第 {{ task.review_round || 1 }} 次审查 {{ task.completed_chunks }}/{{ task.total_chunks }} 块
+            {{ phaseText }} · 修正轮次 {{ task.round }}/{{ task.max_rounds }}
           </span>
         </div>
       </template>
-      <el-progress :percentage="reviewProgress" :status="task.status === 'failed' ? 'exception' : undefined" />
+
+      <!-- 撰写/修正阶段：细粒度不可知，用动效条表示「进行中」，避免进度条长时间停在 0 -->
+      <div v-if="isWriting" class="writing-bar">
+        <div class="writing-fill" />
+      </div>
+      <el-progress
+        v-else
+        :percentage="percentage"
+        :status="task.status === 'failed' ? 'exception' : undefined"
+      />
+
+      <el-steps :active="task.round + (phase === 'done' ? 1 : 0)" simple class="sub-steps">
+        <el-step title="首版撰写" />
+        <el-step v-for="r in task.max_rounds" :key="r" :title="`第 ${r} 轮修正`" />
+      </el-steps>
     </el-card>
 
     <el-card v-if="task?.status === 'completed'" class="mt">
@@ -221,6 +266,37 @@ onBeforeUnmount(stopPolling)
 }
 .steps {
   margin-bottom: 16px;
+}
+/* 撰写/修正阶段的动效进度条：斜纹循环滑动，表示「进行中且耗时不可预估」 */
+.writing-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: #ebeef5;
+  overflow: hidden;
+}
+.writing-fill {
+  height: 100%;
+  width: 40%;
+  border-radius: 3px;
+  background: repeating-linear-gradient(
+    115deg,
+    #a0cfff 0,
+    #a0cfff 10px,
+    #409eff 10px,
+    #409eff 20px
+  );
+  animation: writing-slide 1.2s linear infinite;
+}
+@keyframes writing-slide {
+  from {
+    transform: translateX(-40%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+.sub-steps {
+  margin-top: 12px;
 }
 .ml {
   margin-left: 10px;

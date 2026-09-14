@@ -30,6 +30,7 @@ def _generation_payload(task) -> dict:
     return {
         "id": task.id,
         "status": task.status,
+        "phase": task.phase,
         "round": task.round,
         "max_rounds": task.max_rounds,
         "review_round": task.review_round,
