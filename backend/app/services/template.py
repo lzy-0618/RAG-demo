@@ -27,11 +27,14 @@ from app.models.template import (
     ContractTemplate,
     TemplateCategory,
 )
+from app.services import docx_convert
 from app.services import template_rewrite, template_scan, word_generator
 from app.services import template_structure
 
 TEMPLATE_DIR = settings.TEMPLATE_DIR
 MAX_TEMPLATE_SIZE_MB = 20
+# .doc 是老格式但在实际资料里很常见，导入时统一归一化为 .docx 后落库
+_ALLOWED_TEMPLATE_SUFFIXES = {".doc", ".docx"}
 
 
 def _template_dir() -> Path:
@@ -104,24 +107,38 @@ async def create_template(
     description: str | None,
     uploader: str | None,
 ) -> ContractTemplate:
-    """导入模板：校验 → 落地为原始文件 → 落库（状态 pending，等结构化）。"""
-    if not filename.lower().endswith(".docx"):
-        raise BizError(message="仅支持 .docx 模板（docxtpl 需基于 Word 模板填充）")
+    """导入模板：校验 → 落地为原始文件 → 落库（状态 pending，等结构化）。
+
+    legacy .doc 先归一化为 .docx：扫描（template_scan）与回写（template_rewrite）都基于
+    python-docx，只认 OOXML，所以归一化必须发生在落库之前，source_path 落的是 .docx。
+    """
+    suffix = Path(filename or "").suffix.lower()
+    if suffix not in _ALLOWED_TEMPLATE_SUFFIXES:
+        raise BizError(message="仅支持 .doc / .docx 模板")
     if not content:
         raise BizError(message="模板文件为空")
     if len(content) > MAX_TEMPLATE_SIZE_MB * 1024 * 1024:
         raise BizError(message=f"模板文件超过 {MAX_TEMPLATE_SIZE_MB}MB 限制")
 
     path = await asyncio.to_thread(_save_template_file, filename, content)
+    if docx_convert.is_legacy_doc(path):
+        original = path
+        try:
+            path = await docx_convert.convert_legacy_doc(original, original.parent)
+        finally:
+            # 原始 .doc 不再被 file_path / source_path 引用，留着就是删除模板时清不掉的孤儿
+            original.unlink(missing_ok=True)
+    # 落盘与下载都按实际存储的 .docx 命名，避免下载出 .doc 后缀的 docx 内容
+    stored_name = f"{Path(filename).stem}.docx"
     variables = await asyncio.to_thread(word_generator.extract_template_variables, path)
 
     item = ContractTemplate(
         name=(name or Path(filename).stem).strip(),
         category=(category or "").strip() or None,
-        file_name=Path(filename).name,
+        file_name=stored_name,
         file_path=str(path),
         source_path=str(path),
-        file_size=len(content),
+        file_size=path.stat().st_size,
         variables_json=json.dumps(variables, ensure_ascii=False),
         description=description,
         uploader=uploader,
@@ -239,6 +256,9 @@ async def structure_template(db: Session, item: ContractTemplate, user: str) -> 
     meta = {
         "candidate_count": len(scan.candidates),
         "candidate_kinds": sorted({item_["kind"] for item_ in scan.candidates}),
+        "slot_count": len(scan.slots),
+        "named_slot_count": sum(1 for slot in scan.slots if slot.name),
+        "placeholder_count": result.get("placeholder_count"),
         "contract_type": identified["contract_type"],
         "ignored": identified["ignored"],
         "notes": identified["notes"],

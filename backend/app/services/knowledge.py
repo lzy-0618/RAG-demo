@@ -24,6 +24,7 @@ from app.core.constants import (
 )
 from app.core.exceptions import BizError, NotFoundError
 from app.models.document import Document
+from app.services import docx_convert
 from app.services.dify import dify_client
 
 # 知识库标识 → (展示名, settings 中的 dataset_id 字段名)
@@ -161,7 +162,11 @@ def _absorb_duplicate(db: Session, doc: Document) -> Document:
 async def create_file_document(
     db: Session, *, dataset_key: str, filename: str, content: bytes, uploader: str | None
 ) -> Document:
-    """文件入库（需求①）：落地本地 → Dify create_by_file → 记录 batch 等待索引。"""
+    """文件入库（需求①）：落地本地 → Dify create_by_file → 记录 batch 等待索引。
+
+    legacy .doc 先归一化为 .docx：Dify 按文件名后缀做白名单校验，.doc 一律 400
+    （invalid_param，message 为空，看不出原因），所以必须在入库前转换。
+    """
     if not content:
         raise BizError(message="上传文件为空")
     limit = settings.MAX_UPLOAD_SIZE_MB * 1024 * 1024
@@ -170,6 +175,13 @@ async def create_file_document(
     dataset_id, _ = resolve_dataset(dataset_key)
 
     path = await asyncio.to_thread(_save_upload, filename, content)
+    if docx_convert.is_legacy_doc(path):
+        original = path
+        try:
+            path = await docx_convert.convert_legacy_doc(original, original.parent)
+        finally:
+            # 原始 .doc 不再被 file_path 引用，留着就是删除文档时清不掉的孤儿
+            original.unlink(missing_ok=True)
     doc = Document(
         title=Path(filename).name,
         dataset_key=dataset_key,
@@ -188,7 +200,9 @@ async def create_file_document(
             settings.DIFY_API_KEY,
             dataset_id,
             str(path),
-            Path(filename).name,
+            # 传落盘文件名而非原始名：Dify 按 multipart 的文件名后缀做白名单校验，
+            # 沿用 .doc 的原始名会让归一化白做，仍被 400 拒掉
+            path.name,
             doc_form=doc_form,
         )
     except Exception as exc:  # noqa: BLE001 - 需把上游错误落到文档状态供前端展示

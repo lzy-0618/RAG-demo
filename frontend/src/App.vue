@@ -82,7 +82,12 @@ function onLogout() {
 <style scoped>
 .layout {
   display: flex;
+  /* dvh 让 WebView 在软键盘弹起时收缩，避免底部输入区被遮挡；旧内核回退到 vh */
   height: 100vh;
+  height: 100dvh;
+  /* 刘海屏 / 手势条留白。桌面浏览器下 env() 取值为 0，无副作用 */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
   overflow: hidden;
   color: var(--ink);
   /* 氛围层：纸面暖光，替代原来的纯平灰底。

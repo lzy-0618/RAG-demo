@@ -28,7 +28,7 @@ from app.core.constants import (
 from app.core.exceptions import BizError, NotFoundError
 from app.models.base import SessionLocal
 from app.models.review import ReviewTask
-from app.services import document_parser
+from app.services import document_parser, docx_convert
 from app.services.dify import dify_client
 
 # 逐块调用的并发度：Dify 与上游模型都有速率限制，3 是速度与稳定性的折中
@@ -374,7 +374,7 @@ async def run_review_task(task_id: int, source_text: str | None = None) -> None:
         db.close()
 
 
-def create_task(
+async def create_task(
     db: Session,
     *,
     review_type: str,
@@ -383,7 +383,11 @@ def create_task(
     file_bytes: bytes | None,
     created_by: str | None,
 ) -> ReviewTask:
-    """创建审查任务：文本直接入库，文件落地到 uploads/reviews。"""
+    """创建审查任务：文本直接入库，文件落地到 uploads/reviews（legacy .doc 先归一化为 .docx）。
+
+    归一化放在这里而不是解析处：.doc 是二进制老格式，解析器只认 OOXML，
+    在入口转一次，后台审查与后续任何消费者都只需处理一种格式。
+    """
     if review_type not in (REVIEW_TYPE_CONTRACT, REVIEW_TYPE_REGULATION):
         raise BizError(message=f"未知的审查类型：{review_type}")
     if not content and not file_bytes:
@@ -401,8 +405,15 @@ def create_task(
         reviews_dir = Path(settings.UPLOAD_DIR) / "reviews"
         reviews_dir.mkdir(parents=True, exist_ok=True)
         suffix = Path(filename or "").suffix.lower() or ".txt"
-        target = reviews_dir / f"{uuid.uuid4().hex}{suffix}"
-        target.write_bytes(file_bytes)
+        original = reviews_dir / f"{uuid.uuid4().hex}{suffix}"
+        original.write_bytes(file_bytes)
+        target = original
+        if docx_convert.is_legacy_doc(original):
+            try:
+                target = await docx_convert.convert_legacy_doc(original, reviews_dir)
+            finally:
+                # 原始 .doc 不再被 task.source_path 引用，留着就是删除任务时清不掉的孤儿
+                original.unlink(missing_ok=True)
         task.source_path = str(target)
 
     db.add(task)

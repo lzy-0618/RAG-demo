@@ -23,14 +23,19 @@
 
 ```
 RAG_demo/
-├── frontend/                 # Vue3 + Element Plus
+├── frontend/                 # Web 端（Vue3 + Element Plus），完整 6 个业务页面
 │   └── src/
 │       ├── api/              # axios 请求封装（按模块：chat/knowledge/generate/…）
-│       ├── views/            # 页面：聊天、文件上传、知识库管理、生成、纠错
-│       ├── components/       # 通用组件（聊天流式渲染、上传组件等）
+│       ├── views/            # 页面：登录、问答、知识库、审查、生成、模板
+│       ├── components/       # 通用组件（聊天流式渲染、审查面板等）
 │       ├── stores/           # Pinia 状态
 │       ├── router/           # Vue Router
 │       └── main.ts
+├── frontend-app/             # App 端（Vue3 + Capacitor 8），只含登录 + 智能问答
+│   ├── src/                  # 结构同 frontend/src，但无桌面页面
+│   ├── android/              # Capacitor 原生工程（APK 由此构建）
+│   ├── capacitor.config.ts
+│   └── .env.android          # App 构建的后端地址（--mode android 读取）
 ├── backend/                  # FastAPI
 │   └── app/
 │       ├── api/              # 路由层：对话/上传/生成/纠错/权限（只做参数校验与转发）
@@ -88,13 +93,22 @@ docxtpl                # Word 模板填充
 - 知识库操作走 Dify 知识库 API（上传文档、查询、删除），不要把 Dify 当成纯向量库自建检索链路。
 - 后端到前端的流式转发：订阅 dify-client 的流式响应 → 通过 sse-starlette 转成 SSE 推给前端，不要在内存里攒完整答案再一次性返回。
 
-## 4. 前端规范（frontend/）
+## 4. 前端规范（frontend/ 与 frontend-app/）
+
+两个工程**各自独立、代码不共享**——没有共享包，也没有 workspace。改动哪端就只改哪端；两端都要的能力（比如新增一个接口封装）需要各写一份，这是为换取"两端可独立定制"而接受的代价。
 
 - Vue 3 **Composition API**（`<script setup lang="ts">`），不用 Options API。
 - 目录约定：`api/` 只放 axios 封装与接口定义；页面放 `views/`；可复用 UI 放 `components/`；全局状态放 `stores/`。
 - 聊天界面用 SSE（`EventSource` 或 `fetch` 流式读取）渲染流式输出，支持 markdown 渲染。
 - 文件上传统一走一个上传组件，统一处理进度、错误、重试。
 - 权限相关：前端路由守卫 + 按钮级权限，权限来源为后端 RBAC 返回的角色。
+
+### 4.1 两端边界
+
+- **`frontend/`（Web）**：承载全部业务页面，不引入任何 `@capacitor/*` 依赖，不做平台判断。
+- **`frontend-app/`（App）**：只保留 `/login` 与 `/chat`，含 `@capacitor/*` 依赖与 `android/` 原生工程。
+- **不要在任何一端重新引入 `isApp()` 之类的运行时平台分支**——那等于把刚拆开的耦合装回去。两端行为不同，就在各自工程里各写各的。
+- 打包与运行流程见 `docs/Android App 打包与运行说明.md`。
 
 ## 5. Dify 集成规范（dify/）
 

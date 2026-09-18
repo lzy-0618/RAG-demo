@@ -95,7 +95,12 @@ async function onSubmit() {
 .login-page {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(380px, 0.85fr);
+  /* dvh 让 WebView 在软键盘弹起时收缩；旧内核回退到 vh */
   height: 100vh;
+  height: 100dvh;
+  /* 登录页不在 App.vue 外壳内，安全区留白需自理 */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
   color: var(--ink);
 }
 
@@ -233,6 +238,7 @@ async function onSubmit() {
     grid-template-columns: 1fr;
     height: auto;
     min-height: 100vh;
+    min-height: 100dvh;
   }
 
   .intro {

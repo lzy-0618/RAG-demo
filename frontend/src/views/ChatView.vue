@@ -232,7 +232,7 @@ onMounted(reset)
     </div>
 
     <!-- 专家标注弹窗：原回答只读展示，专家填写修正内容 -->
-    <el-dialog v-model="annotateVisible" title="专家标注纠错" width="680px">
+    <el-dialog v-model="annotateVisible" title="专家标注纠错" width="min(680px, 92vw)">
       <div class="annotate-block">
         <div class="annotate-label">用户问题</div>
         <div class="annotate-text">{{ annotateQuestion || '（未记录）' }}</div>

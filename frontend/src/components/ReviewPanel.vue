@@ -2,9 +2,9 @@
 /** 审查面板：合同审查与规章制度审查共用（页面不同、审查类型不同）。 */
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import type { UploadRawFile, UploadUserFile } from 'element-plus'
 import { getReviewTask, submitReview } from '@/api/review'
 import type { ReviewTaskOut } from '@/api/review'
+import FileDropzone from '@/components/FileDropzone.vue'
 import RiskNote from '@/components/RiskNote.vue'
 
 const props = defineProps<{
@@ -13,7 +13,7 @@ const props = defineProps<{
 
 const inputMode = ref<'text' | 'file'>('text')
 const content = ref('')
-const fileList = ref<UploadUserFile[]>([])
+const reviewFile = ref<File | null>(null)
 const submitting = ref(false)
 const task = ref<ReviewTaskOut | null>(null)
 
@@ -28,12 +28,8 @@ const progress = computed(() => {
   return Math.round(((t.completed_chunks + t.failed_chunks) / t.total_chunks) * 100)
 })
 const canSubmit = computed(() =>
-  inputMode.value === 'text' ? content.value.trim().length > 0 : fileList.value.length > 0,
+  inputMode.value === 'text' ? content.value.trim().length > 0 : !!reviewFile.value,
 )
-
-function onFileChange(_file: unknown, files: UploadUserFile[]) {
-  fileList.value = files
-}
 
 async function onSubmit() {
   if (!canSubmit.value || submitting.value) {
@@ -42,11 +38,10 @@ async function onSubmit() {
   }
   submitting.value = true
   try {
-    const file = fileList.value[0]?.raw as UploadRawFile | undefined
     const res = await submitReview({
       reviewType: props.reviewType,
       content: inputMode.value === 'text' ? content.value : undefined,
-      file: inputMode.value === 'file' ? file : undefined,
+      file: inputMode.value === 'file' ? (reviewFile.value ?? undefined) : undefined,
     })
     ElMessage.success('已提交审查，正在处理')
     task.value = null
@@ -87,7 +82,7 @@ function reset() {
   stopPolling()
   task.value = null
   content.value = ''
-  fileList.value = []
+  reviewFile.value = null
 }
 
 onBeforeUnmount(stopPolling)
@@ -108,17 +103,11 @@ onBeforeUnmount(stopPolling)
           />
         </el-tab-pane>
         <el-tab-pane label="文件上传" name="file">
-          <el-upload
-            drag
-            :auto-upload="false"
-            :limit="1"
-            :file-list="fileList"
-            :on-change="onFileChange"
-            accept=".pdf,.docx,.md,.txt"
-          >
-            <div class="upload-tip">拖拽文件到此处，或点击选择</div>
-            <div class="upload-hint">支持 PDF / DOCX / MD / TXT；长文档会自动分块逐块审查</div>
-          </el-upload>
+          <FileDropzone
+            v-model="reviewFile"
+            accept=".pdf,.doc,.docx,.md,.txt"
+            :hint="`长文档会自动分块逐块审查；.doc 上传后自动转换为 .docx`"
+          />
         </el-tab-pane>
       </el-tabs>
 
@@ -199,16 +188,6 @@ onBeforeUnmount(stopPolling)
   align-items: center;
   gap: var(--space-3);
   margin-top: var(--space-4);
-}
-
-.upload-tip {
-  color: var(--ink-2);
-}
-
-.upload-hint {
-  margin-top: var(--space-2);
-  font-size: var(--fs-xs);
-  color: var(--muted);
 }
 
 .file-name {

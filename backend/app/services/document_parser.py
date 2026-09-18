@@ -166,7 +166,11 @@ def parse_pdf(file_path: str | Path) -> ParsedDocument:
 
 
 def parse_file(file_path: str | Path) -> ParsedDocument:
-    """按扩展名分派解析器。"""
+    """按扩展名分派解析器。
+
+    只接受已经是 OOXML 的 .docx：legacy .doc 属二进制老格式，由上传入口
+    （review / knowledge 服务）统一归一化后再进来，解析层不做格式转换。
+    """
     suffix = Path(file_path).suffix.lower()
     if suffix == ".pdf":
         return parse_pdf(file_path)
@@ -174,7 +178,10 @@ def parse_file(file_path: str | Path) -> ParsedDocument:
         return parse_docx(file_path)
     if suffix in (".md", ".txt"):
         return parse_text(Path(file_path).read_text(encoding="utf-8", errors="ignore"))
-    raise ValueError(f"暂不支持的文件类型：{suffix}（支持 pdf / docx / md / txt）")
+    raise ValueError(
+        f"暂不支持的文件类型：{suffix}（支持 pdf / docx / md / txt；"
+        ".doc 需在上传入口归一化为 .docx）"
+    )
 
 
 def parse_document(file_path: str | Path) -> ParsedDocument:

@@ -1,4 +1,7 @@
-"""docx → PDF 转换服务（LibreOffice headless），供模板与生成稿预览使用。
+"""Word 文档转换服务（LibreOffice headless）：legacy .doc 归一化 + docx → PDF 预览。
+
+两条转换链路共用同一套 LibreOffice 环境约束（字体、profile、串行化），
+因此放在同一模块里——分开会让"两份环境配置各自漂移"，而这里的每一条都是踩坑结论。
 
 三条硬约束，都来自实测踩坑（详见 docs/PDF中文字体渲染问题排查经验.md）：
 
@@ -214,42 +217,58 @@ def _verify_cjk(pdf_path: Path, source: Path) -> None:
         )
 
 
-def _run_soffice(source: Path, target: Path, fontconfig: Path, profile: Path) -> None:
-    """同步执行转换（由 asyncio.to_thread 调用）。"""
+def _soffice_context() -> tuple[Path, Path]:
+    """准备一次转换所需的 fontconfig 与 profile（两条约束的成因见模块 docstring）。"""
+    fontconfig = _ensure_fontconfig(_font_dirs())
+    return fontconfig, _ensure_profile(fontconfig)
+
+
+def _run_soffice(
+    source: Path,
+    outdir: Path,
+    convert_to: str,
+    produced_name: str,
+    fontconfig: Path,
+    profile: Path,
+) -> Path:
+    """同步执行一次转换，返回产物路径（由 asyncio.to_thread 调用，调用方须持有信号量）。
+
+    convert_to 是 LibreOffice 的导出过滤器名（pdf / docx）；produced_name 是它按源文件
+    推导出的产物文件名——LibreOffice 会自行决定输出名，所以这里按约定推导后校验，
+    不能只看退出码就认为产物可用。
+    """
     binary = _resolve_soffice()
     env = os.environ.copy()
     env["FONTCONFIG_FILE"] = str(fontconfig)
-    with tempfile.TemporaryDirectory(prefix="docx2pdf-") as workdir:
-        cmd = [
-            binary,
-            "--headless",
-            # 独立 profile：共用会导致锁冲突；参数值必须是 file:// URL
-            f"-env:UserInstallation=file://{profile.resolve()}",
-            "--convert-to",
-            "pdf",
-            "--outdir",
-            workdir,
-            str(source),
-        ]
-        try:
-            result = subprocess.run(
-                cmd,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=settings.PDF_CONVERT_TIMEOUT,
-                check=False,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise BizError(
-                message=f"文档转换超时（>{settings.PDF_CONVERT_TIMEOUT} 秒），请稍后重试"
-            ) from exc
-        produced = Path(workdir) / f"{source.stem}.pdf"
-        if result.returncode != 0 or not produced.exists():
-            detail = (result.stderr or result.stdout or "").strip()[-400:]
-            raise BizError(message=f"文档转换失败：{detail or '未产出 PDF，请检查文件是否损坏'}")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(produced), str(target))
+    cmd = [
+        binary,
+        "--headless",
+        # 独立 profile：共用会导致锁冲突；参数值必须是 file:// URL
+        f"-env:UserInstallation=file://{profile.resolve()}",
+        "--convert-to",
+        convert_to,
+        "--outdir",
+        str(outdir),
+        str(source),
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=settings.PDF_CONVERT_TIMEOUT,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise BizError(
+            message=f"文档转换超时（>{settings.PDF_CONVERT_TIMEOUT} 秒），请稍后重试"
+        ) from exc
+    produced = Path(outdir) / produced_name
+    if result.returncode != 0 or not produced.exists():
+        detail = (result.stderr or result.stdout or "").strip()[-400:]
+        raise BizError(message=f"文档转换失败：{detail or '未产出文件，请检查文件是否损坏'}")
+    return produced
 
 
 async def convert_to_pdf(source: str | Path, *, force: bool = False) -> Path:
@@ -269,14 +288,18 @@ async def convert_to_pdf(source: str | Path, *, force: bool = False) -> Path:
     if target.exists() and not force:
         return target
 
-    fontconfig = _ensure_fontconfig(dirs)
-    profile = _ensure_profile(fontconfig)
+    fontconfig, profile = _soffice_context()
 
     async with _get_semaphore():
         # 双重检查：等待信号量期间可能已被其它请求转换完成
         if target.exists() and not force:
             return target
-        await asyncio.to_thread(_run_soffice, source, target, fontconfig, profile)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="docx2pdf-") as workdir:
+            produced = await asyncio.to_thread(
+                _run_soffice, source, Path(workdir), "pdf", f"{source.stem}.pdf", fontconfig, profile
+            )
+            shutil.move(str(produced), str(target))
 
     try:
         _verify_cjk(target, source)
@@ -284,6 +307,64 @@ async def convert_to_pdf(source: str | Path, *, force: bool = False) -> Path:
         # 自检不过的产物必须丢弃，避免下次命中缓存直接把坏件返回
         target.unlink(missing_ok=True)
         raise
+    return target
+
+
+# ===== legacy .doc 归一化 =====
+#
+# .doc 是 Word 97-2003 的 OLE2 复合文档，与 .docx 的 OOXML（zip 包）是两种格式，
+# python-docx / docxtpl / Dify 都只处理 .docx。所以在入口处统一归一化，
+# 让下游只面对一种格式，而不是在每个消费方各写一遍兼容。
+#
+# 实测结论（直连 Dify create_by_file 交叉验证文件名与内容两个变量）：Dify 按 multipart
+# 的文件名后缀做白名单校验，.doc 直接 400 invalid_param 且 message 为空——看不出原因；
+# 把已经是 .docx 的内容用 .doc 的名字上传同样被拒。所以归一化之后必须连文件名一起换成
+# .docx，只换内容不换名等于没换。
+
+
+def is_legacy_doc(filename: str | Path) -> bool:
+    """是否为 Word 97-2003 二进制格式（.doc）。"""
+    return Path(filename).suffix.lower() == ".doc"
+
+
+def _verify_docx(path: Path, source: Path) -> None:
+    """结构自检：产物必须是含 word/document.xml 的 OOXML 包。
+
+    只看退出码和文件大小不够——soffice 对损坏输入也可能"成功"产出一个空壳，
+    而空壳会以"文档内容为空"的形式混过审查，暴露成假结论而不是报错。
+    """
+    try:
+        with zipfile.ZipFile(path) as archive:
+            if "word/document.xml" not in archive.namelist():
+                raise KeyError("缺少 word/document.xml")
+    except (zipfile.BadZipFile, KeyError, OSError) as exc:
+        raise BizError(
+            message=f"「{source.name}」转换为 .docx 后结构异常（{exc}）。"
+            "文件可能已损坏，请先用 Word 打开并另存为 .docx 再上传"
+        ) from exc
+
+
+async def convert_legacy_doc(source: str | Path, dest_dir: str | Path) -> Path:
+    """把 .doc 转成 .docx，返回产物路径（产物名为 `<源文件名>.docx`）。
+
+    与 convert_to_pdf 不同，这里不做缓存：归一化只在上传入口发生一次，产物由调用方
+    持久化，重复转换同一份文件没有意义。dest_dir 中若已有同名文件会被覆盖，
+    因此调用方应保证源文件名唯一（上传落盘时都带 uuid）。
+    """
+    source = Path(source).expanduser().resolve()
+    if not source.is_file():
+        raise BizError(message=f"待转换文件不存在：{source}")
+
+    dest_dir = Path(dest_dir).expanduser().resolve()
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    target = dest_dir / f"{source.stem}.docx"
+
+    fontconfig, profile = _soffice_context()
+    async with _get_semaphore():
+        await asyncio.to_thread(
+            _run_soffice, source, dest_dir, "docx", target.name, fontconfig, profile
+        )
+    _verify_docx(target, source)
     return target
 
 

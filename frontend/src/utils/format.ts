@@ -4,3 +4,11 @@ export function formatDateTime(value?: string | null): string {
   if (!value) return '—'
   return value.length >= 16 ? value.slice(0, 16) : value
 }
+
+/** 文件大小：只到一位小数。模板与审查附件都在几十 MB 以内，更大的单位没有区分度；
+ *  不足 1KB 的按 1KB 显示，避免出现"0 KB"。 */
+export function formatFileSize(bytes: number): string {
+  if (!bytes) return '0 KB'
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`
+}

@@ -1,6 +1,7 @@
 import axios from 'axios'
 import type { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse } from 'axios'
 import { ElMessage } from 'element-plus'
+import { navigateTo } from '@/utils/navigation'
 
 /** 后端统一响应结构：{ code, message, data }，code=0 表示成功 */
 export interface ApiResult<T = unknown> {
@@ -36,7 +37,8 @@ http.interceptors.response.use(
       localStorage.removeItem('token')
       if (!window.location.pathname.startsWith('/login')) {
         ElMessage.warning('登录已过期，请重新登录')
-        window.location.href = '/login'
+        // 走 router 而非整页跳转：WebView 内整页重载会丢状态并闪白屏
+        navigateTo('/login')
       }
     } else {
       ElMessage.error(message)

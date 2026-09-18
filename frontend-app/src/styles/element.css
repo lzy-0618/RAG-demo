@@ -1,0 +1,410 @@
+/* Element Plus 组件级改皮。
+ *
+ * 令牌桥接（tokens.css）已经改掉颜色、圆角、字体，但「出厂感」还有一半来自组件的
+ * 结构习惯：实心彩色标签、带边框的表格、等宽的彩色填充、圆润的大圆角卡片。
+ * 这里逐组件把结构习惯改成公文体：描边代替填充、发丝线代替实线、方正小圆角、
+ * 数据用等宽数字。只调外观，不改任何交互行为。
+ */
+
+/* ==========================================================================
+   卡片：去掉「白卡浮在白底上」的悬浮感，改为发丝线 + 一级墨色阴影
+   ========================================================================== */
+
+.el-card {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  transition: box-shadow var(--dur-base) var(--ease-out);
+}
+
+.el-card.is-hover-shadow:hover,
+.el-card.is-hover-shadow:focus {
+  box-shadow: var(--shadow-2);
+}
+
+/* 卡片头 = 文书头：衬线标题建立层级，发丝线收口 */
+.el-card__header {
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--font-serif);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+/* 头部里的辅助信息、标签、按钮回到无衬线 UI 字体，避免说明文字被衬线化 */
+.el-card__header .hint,
+.el-card__header .key-hint,
+.el-card__header small,
+.el-card__header time,
+.el-card__header .el-tag,
+.el-card__header .el-button,
+.el-card__header .el-progress {
+  font-family: var(--font-sans);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+/* ==========================================================================
+   按钮：主按钮悬停取更深同色（Element 默认变浅会把对比度降到 3.45:1），
+   禁用态改中性灰底（Element 默认是浅色主色底 + 白字，几乎不可见）
+   ========================================================================== */
+
+.el-button {
+  font-weight: 500;
+  transition: color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+
+.el-button--primary {
+  --el-button-hover-bg-color: var(--accent-ink);
+  --el-button-hover-border-color: var(--accent-ink);
+  --el-button-active-bg-color: var(--accent-press);
+  --el-button-active-border-color: var(--accent-press);
+  --el-button-disabled-text-color: var(--muted);
+  --el-button-disabled-bg-color: var(--surface-2);
+  --el-button-disabled-border-color: var(--rule-strong);
+}
+
+/* 链接按钮悬停也用更深的同色，而不是 Element 默认的「变浅」 */
+.el-button.is-link.el-button--primary {
+  --el-button-hover-link-text-color: var(--accent-ink);
+}
+
+.el-button.is-link.el-button--danger,
+.el-button.is-link.el-button--error {
+  --el-button-hover-link-text-color: color-mix(in srgb, var(--risk) 80%, #000);
+}
+
+.el-button.is-link.el-button--success {
+  --el-button-hover-link-text-color: color-mix(in srgb, var(--ok) 80%, #000);
+}
+
+.el-button.is-link.el-button--warning {
+  --el-button-hover-link-text-color: color-mix(in srgb, var(--warn) 80%, #000);
+}
+
+/* ==========================================================================
+   表格：发丝横线 + 拉开字距的表头；操作列默认墨色，避免整列红字
+   ========================================================================== */
+
+.el-table {
+  --el-table-border-color: var(--rule);
+  --el-table-header-bg-color: var(--surface-2);
+  --el-table-header-text-color: var(--ink-2);
+  --el-table-text-color: var(--ink);
+  --el-table-row-hover-bg-color: var(--surface-2);
+  --el-table-current-row-bg-color: var(--accent-wash);
+  --el-table-bg-color: var(--surface);
+  --el-table-tr-bg-color: var(--surface);
+  font-variant-numeric: tabular-nums;
+}
+
+.el-table th.el-table__cell {
+  border-bottom: 1px solid var(--rule-strong);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+/* 操作列：默认墨色、悬停上强调色。「删除」保持语义红，两者不再撞色。 */
+.el-table .el-button.is-link {
+  color: var(--ink-2);
+}
+
+.el-table .el-button.is-link:hover {
+  color: var(--accent);
+}
+
+.el-table .el-button.is-link.el-button--danger {
+  color: var(--risk);
+}
+
+.el-table .el-button.is-link.el-button--danger:hover {
+  color: color-mix(in srgb, var(--risk) 80%, #000);
+}
+
+/* 数字与时间列一律不折行：折行会让行高不齐，也容易被右侧固定列遮住 */
+.el-table .cell .u-num,
+.el-table .cell .u-tnum {
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   表单控件：边框用发丝线，聚焦用强调色（Element 默认的浅色描边偏冷偏软）
+   ========================================================================== */
+
+.el-input__wrapper,
+.el-textarea__inner {
+  transition: box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.el-select__wrapper {
+  box-shadow: 0 0 0 1px var(--rule-strong) inset;
+  transition: box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.el-select__wrapper:hover {
+  box-shadow: 0 0 0 1px var(--ink-2) inset;
+}
+
+.el-select__wrapper.is-focused {
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+/* ==========================================================================
+   标签：改印章式描边（Element 默认是实心浅色块，表格里堆起来会盖过数据本身）
+   未指定 type 的标签是中性标注（例如模板的占位变量名），不占用强调色 ——
+   否则一列变量标签就是一片朱红，违反「单屏只有一个强调色」。
+   ========================================================================== */
+
+.el-tag {
+  border-width: 1px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.04em;
+}
+
+/* Element 会给未显式指定 type 的标签补上 el-tag--primary，所以「中性」要在这里定义。
+   未指定 type 的标签是标注（例如模板的占位变量名），不是关键动作，不占用强调色 ——
+   否则一列变量标签就是一片朱红，违反「单屏只有一个强调色」。 */
+.el-tag.el-tag--primary {
+  --el-tag-text-color: var(--ink-2);
+  --el-tag-bg-color: transparent;
+  --el-tag-border-color: var(--rule-strong);
+}
+
+/* 显式指定语义类型的标签才带颜色，且一律描边而非填充 */
+.el-tag.el-tag--success,
+.el-tag.el-tag--warning,
+.el-tag.el-tag--danger,
+.el-tag.el-tag--error,
+.el-tag.el-tag--info {
+  --el-tag-bg-color: transparent;
+  --el-tag-border-color: currentColor;
+}
+
+/* ==========================================================================
+   对话框
+   ========================================================================== */
+
+.el-dialog {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3);
+}
+
+.el-dialog__header {
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--rule);
+}
+
+.el-dialog__title {
+  font-family: var(--font-serif);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  letter-spacing: var(--tracking-display);
+  color: var(--ink);
+}
+
+.el-dialog__footer {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--rule);
+}
+
+.el-message-box {
+  border-radius: var(--radius-lg);
+}
+
+.el-message-box__title {
+  font-family: var(--font-serif);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+}
+
+.el-message {
+  border-radius: var(--radius-md);
+  border-color: var(--rule);
+  box-shadow: var(--shadow-2);
+}
+
+/* ==========================================================================
+   反馈类组件
+   ========================================================================== */
+
+.el-alert {
+  --el-alert-padding: var(--space-3) var(--space-4);
+  --el-alert-title-font-size: var(--fs-sm);
+  border-radius: var(--radius-md);
+}
+
+/* 进度条：细、圆、等宽百分比。宽度过渡让「按轮次推进」不再是硬切。 */
+.el-progress-bar__outer {
+  background-color: var(--rule);
+  border-radius: var(--radius-pill);
+}
+
+.el-progress-bar__inner {
+  border-radius: var(--radius-pill);
+  transition: width var(--dur-base) var(--ease-out);
+}
+
+.el-progress__text {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+}
+
+/* 简单步骤条：淡底 + 发丝框，当前节点用朱红，替代默认的浅蓝灰横条 */
+.el-steps--simple {
+  padding: var(--space-3) var(--space-5);
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+}
+
+.el-steps--simple .el-step__head.is-process {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.el-steps--simple .el-step__head.is-finish {
+  color: var(--ink-2);
+  border-color: var(--ink-2);
+}
+
+.el-steps--simple .el-step__head.is-wait {
+  color: var(--muted);
+  border-color: var(--rule-strong);
+}
+
+.el-steps--simple .el-step__title {
+  font-size: var(--fs-sm);
+  letter-spacing: 0.02em;
+}
+
+.el-steps--simple .el-step__title.is-process {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.el-steps--simple .el-step__title.is-finish {
+  color: var(--ink-2);
+}
+
+.el-steps--simple .el-step__title.is-wait {
+  color: var(--muted);
+}
+
+.el-steps--simple .el-step__arrow::before,
+.el-steps--simple .el-step__arrow::after {
+  background: var(--rule-strong);
+}
+
+.el-divider {
+  --el-border-color: var(--rule);
+}
+
+.el-divider__text {
+  font-family: var(--font-sans);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  background-color: var(--surface);
+}
+
+/* ==========================================================================
+   分页 / 标签页 / 上传 / 下拉 / 空态
+   ========================================================================== */
+
+.el-pagination {
+  --el-pagination-font-size: var(--fs-sm);
+  --el-pagination-hover-color: var(--accent);
+}
+
+.el-pagination .el-pager li,
+.el-pagination .btn-prev,
+.el-pagination .btn-next {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 当前页用朱红实心块，与侧栏「当前定位」用同一套语言 */
+.el-pagination .el-pager li.is-active {
+  background-color: var(--accent);
+  color: #fff;
+  border-radius: var(--radius-sm);
+}
+
+.el-tabs__item {
+  font-size: var(--fs-base);
+  letter-spacing: 0.02em;
+  color: var(--ink-2);
+}
+
+.el-tabs__item.is-active {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.el-tabs__active-bar {
+  height: 2px;
+  background-color: var(--accent);
+}
+
+.el-tabs__nav-wrap::after {
+  height: 1px;
+  background-color: var(--rule);
+}
+
+.el-upload-dragger {
+  padding: var(--space-5);
+  border: 1px dashed var(--rule-strong);
+  border-radius: var(--radius-md);
+  background-color: var(--surface-2);
+  transition: border-color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+
+.el-upload-dragger:hover,
+.el-upload-dragger.is-dragover {
+  border-color: var(--accent);
+  background-color: var(--accent-wash);
+}
+
+.el-select-dropdown__item.is-selected {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.el-select-dropdown__item.is-hovering {
+  background-color: var(--surface-2);
+}
+
+.el-popper.is-light {
+  border-color: var(--rule);
+  box-shadow: var(--shadow-2);
+}
+
+.el-popper.is-dark {
+  background: var(--ink);
+  border-color: var(--ink);
+  border-radius: var(--radius-md);
+}
+
+.el-popper.is-dark .el-popper__arrow::before {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.el-empty {
+  --el-empty-padding: var(--space-8) 0;
+}
+
+.el-empty__description p {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}

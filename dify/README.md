@@ -322,14 +322,14 @@ while True:
 
 ## 合同模板结构化 Workflow/Agent
 
-> 对应需求⑥（合同模板库）：模板导入时智能识别待填字段。后端先把 `.docx` 扫描成「带锚点的文档结构大纲」+「候选空位清单」，交给本应用输出结构化字段清单 JSON，前端据此生成填充表单，后端据此渲染 docxtpl 占位符。
+> 对应需求⑥（合同模板库）：模板导入时智能识别待填字段。后端先把 `.docx` 扫描成「带锚点的文档结构大纲」+「候选空位清单」+「字段槽位清单」，交给本应用输出结构化字段清单 JSON，前端据此生成填充表单，后端据此渲染 docxtpl 占位符。
 
 ### 编排
 
 ```
-Start(doc_outline, candidates_json, template_name)
-  → LLM 识别待填字段（通读大纲 + 候选清单，temperature 0.1 / response_format=json_object）
-  → Code 兜底解析与规整（剥 <think> → 从后往前取含 fields 的最后一个合法 JSON → 规整 key/type/anchor）
+Start(doc_outline, candidates_json, slots_json, template_name)
+  → LLM 识别待填字段（通读大纲 + 槽位清单，temperature 0.1 / response_format=json_object）
+  → Code 兜底解析与规整（剥 <think> → 从后往前取含 fields 的最后一个合法 JSON → 绑槽位、规整 key/type/anchor）
   → End(fields_json, parse_error)
 ```
 
@@ -341,34 +341,40 @@ Start(doc_outline, candidates_json, template_name)
 | --- | --- | --- | --- |
 | `doc_outline` | Start 输入 | paragraph | 带锚点编号的文档结构文本，如 `[p0] 钢材采购合同` / `[p1] 甲方（采购方）：__________`（必填） |
 | `candidates_json` | Start 输入 | paragraph | 后端规则扫描出的候选空位清单 JSON 字符串，可为 `[]` |
+| `slots_json` | Start 输入 | paragraph | **字段槽位清单** JSON 字符串：同名变量已合并成一个槽位，是模型识别的判断单位，可为 `[]` |
 | `template_name` | Start 输入 | paragraph | 模板名称（必填） |
 | `llm_output` | LLM 输出 | string | 模型原始输出（仅内部，供 Code 解析） |
 | `fields_json` | Code 输出 | string | 字段清单 JSON 字符串 |
 | `parse_error` | Code 输出 | string | `"true"` / `"false"`；后端据此把本次识别标记为失败并提示人工复核 |
 
+> `slots_json` 是后加的入参，用于识别 Word 表单域（FORMTEXT）与 `#...#` 占位符、并让同名变量只填一次。它对模型是可选的：老版本后端不传时，模型退化成只按大纲 + 候选清单判断。`candidates_json` 仍然保留，供字段回找原始锚点。
+
 **End 输出**（后端 `run_workflow` 的 `outputs`）：
 
 ```json
 {
-  "fields_json": "{\"contract_type\":\"采购\",\"fields\":[{\"key\":\"party_a_name\",\"label\":\"甲方名称\",\"type\":\"text\",\"required\":true,\"anchor\":\"p1\",\"default\":\"\",\"options\":[],\"confidence\":0.96,\"reason\":\"『甲方（采购方）：』后为空\"}],\"ignored\":[{\"anchor\":\"p5\",\"reason\":\"已有固定条款正文\"}],\"notes\":\"识别到 8 个待填字段\"}",
+  "fields_json": "{\"contract_type\":\"采购\",\"fields\":[{\"key\":\"PUR_BILL_TO_NAME\",\"label\":\"甲方单位名称\",\"type\":\"text\",\"required\":true,\"slot_id\":\"s2\",\"owner\":\"甲方\",\"source_name\":\"PUR_BILL_TO_NAME\",\"anchor\":\"p3\",\"default\":\"\",\"options\":[],\"confidence\":0.96,\"reason\":\"模板表单域名为 PUR_BILL_TO_NAME，位于『甲方：』之后\"}],\"ignored\":[{\"slot_id\":\"s30\",\"anchor\":\"\",\"reason\":\"已有固定条款正文\"}],\"notes\":\"识别到 37 个待填字段\"}",
   "parse_error": "false"
 }
 ```
 
 **Code 节点的硬约束（后端依赖，不可放宽）**：
 
-- `key` 必须是合法 Jinja 标识符 `^[A-Za-z_][A-Za-z0-9_]*$`（英文/拼音+下划线）；模型若输出中文/空格键，Code 会兜底改写为 `field_N`，保证不产生非法占位符。
+- `key` 必须是合法 Jinja 标识符 `^[A-Za-z_][A-Za-z0-9_]*$`（英文/拼音+下划线）；模型若输出中文/空格键，Code 先退回槽位原名，再退回 `field_N`，保证不产生非法占位符。
+- **带 `name` 的槽位（表单域 / `#...#`），`key` 必须原样沿用 `name`**：`PUR_BILL_TO_NAME`、`DTK9980` 这类名字来自甲方既有模板体系，改写会让生成的合同对不上他们的数据字段。只有 `#...#` 的内文是中文时（不符合标识符规则）才另起英文 key，中文原名进 `label`。
+- **一个槽位一个字段**；`slot_id` 必须原样照抄 `slots_json`，集合外的 `slot_id` 会被置空（后端退回按原名/锚点定位）。
 - `type` 只能取 `text` / `textarea` / `date` / `number` / `select`；别名（如 `string`/`enum`）会被归一化，`select` 无 `options` 时自动降为 `text`。
 - `anchor` 必须来自输入：Code 从 `doc_outline` 的 `[pN]` 与 `candidates_json` 中收集合法锚点集合，集合外的锚点置空，杜绝编造。
+- `owner` 取「甲方」「乙方」「附件」之一；后端给的 `owner_hint` 只是提示（同时提到甲乙双方的条款里容易误判），以模型自己的判断为准。**`label` 必须全局唯一**——甲乙双方成对的字段（「联系地址」「开户银行」「账号」「社会信用代码」「单位名称」）原文标签一模一样，要靠 `owner` 补成「甲方联系地址」「乙方联系地址」这类可区分的名字。
 
 ### 关于 Agent 节点降级为 LLM 节点
 
 用户要求用 Agent 节点承担识别。本机 Dify 1.17.0 容器内**确实存在** Agent 节点模型（`core/workflow/nodes/agent/entities.py::AgentNodeData`，`data.type = "agent"`），但其 DSL 字段结构（`agent_strategy_*` / `agent_parameters` / 插件 `plugin_unique_identifier` 等）与项目现有 4 个 DSL 差异较大，且依赖由插件提供的 agent 策略（当前环境无法确认已安装可用策略），硬写 Agent 节点导入后会成为坏节点。项目校验脚本 `dify/scripts/validate_dsl.py` 原先**只注册了 8 种节点模型、未注册 `agent`**，含 Agent 节点的 DSL 必然报 `FAIL 节点 xxx: 未知 data.type: agent`——该缺口已修复（`agent` 已注册，并注明其插件依赖），后续可随时切回 Agent 节点。
 
 > **联调结论（2026-09-14）**：LLM 节点形态已实测通过。对一份纯下划线填空、不含任何 `{{ }}` 的合同模板，2 秒返回 5 个字段（含中文标签、控件类型、必填标记、置信度与判断理由），并正确忽略标题与固定条款；下游"复核确认 → 必填拦截 → 生成 → 产物校验"全链路通过。
-> **注意**：提示词只要求输出 `anchor`（不含 `candidate_id`），后端已按锚点回退解析候选空位；如果希望同一段落里多个填空的定位更精确，可在提示词中补上 `candidate_id` 输出。
+> **注意**：提示词要求输出 `slot_id`（含 `name` 的槽位还要原样沿用 `name` 做 key），比早期只输出 `anchor` 精确得多——同一段落里多个变量（实测通知条款 8 个、生效期限 9 个）靠 `slot_id` 才能各自定位。旧版应用只给 `anchor` 时后端仍按锚点回退解析，不会因为没重新导入应用就整条链路不可用。
 
-因此按任务约定「校验无法通过则降级」，本应用**使用 LLM 节点承载识别**，输入输出契约与 Agent 方案完全一致（同为 3 入 2 出）。若后续 `validate_dsl.py` 补充 `agent` 节点模型，可直接把 `llm_struct` 节点替换为 Agent 节点（`agent_strategy_provider_name: langgenius/agent/agent` + `agent_strategy_name: function_calling`），Code / End 节点无需改动。
+因此按任务约定「校验无法通过则降级」，本应用**使用 LLM 节点承载识别**，输入输出契约与 Agent 方案完全一致（同为 4 入 2 出）。若后续 `validate_dsl.py` 补充 `agent` 节点模型，可直接把 `llm_struct` 节点替换为 Agent 节点（`agent_strategy_provider_name: langgenius/agent/agent` + `agent_strategy_name: function_calling`），Code / End 节点无需改动。
 
 ### 模型与参数
 
@@ -380,14 +386,19 @@ Start(doc_outline, candidates_json, template_name)
 2. 确认 DeepSeek 供应商已配置 API Key（LLM 节点模型为 `deepseek-v4-flash`，思考模式已关闭）。
 3. 本应用**不检索知识库**，无需绑定任何 dataset（`context.enabled = false`）。
 4. 发布应用 → 「API 访问」生成 API Secret → 填入后端 `backend/.env` 的 `DIFY_TEMPLATE_STRUCTURE_APP_KEY`。
-5. 后端上传 `.docx` 后：扫描空位 → 拼装 `doc_outline` / `candidates_json` / `template_name` → 调用本应用 → 用 `fields_json` 生成填充表单与 docxtpl 占位符；`parse_error="true"` 时提示人工复核。
+5. 后端上传 `.docx` 后：扫描空位与槽位 → 拼装 `doc_outline` / `candidates_json` / `slots_json` / `template_name` → 调用本应用 → 用 `fields_json` 生成填充表单与 docxtpl 占位符；`parse_error="true"` 时提示人工复核。
+
+> **改了提示词/Code 节点后必须重新导入本应用**（Dify 不会自动同步仓库里的 DSL）。旧应用仍能跑（`slots_json` 可选、后端有锚点回退），但识别不到表单域与 `#...#`，且同一段落多个变量会定位不准。
 
 ### 验证用例
 
 - **纯下划线填空模板**：`doc_outline` 含 `[p1] 甲方（采购方）：__________`、`[p2] 乙方（供货方）：__________`、`[p9] 签订日期：____年__月__日` → 期望 `fields` 覆盖甲乙方名称与签订日期，日期字段 `type="date"`，各 `anchor` 正确指向 p1/p2/p9。
-- **无占位符模板**：`doc_outline` 全为固定条款正文（如「第一条 本协议自双方签字之日起生效」），`candidates_json="[]"` → 期望 `fields=[]`、`parse_error="false"`、`notes` 说明无需填写字段（不臆造字段）。
-- **候选误报**：`candidates_json` 混入一条实为固定条款的行 → 期望该条进入 `ignored` 并给出原因，不出现在 `fields`。
-- **非法键/锚点兜底**：令模型故意返回中文 `key` 与不存在的 `anchor` → 期望 `key` 被改写为 `field_N`、`anchor` 置空，输出仍是合法 JSON。
+- **Word 表单域模板**：`slots_json` 含 `{"slot_id":"s2","kind":"form_field","name":"PUR_BILL_TO_NAME","label_hint":"甲方","owner_hint":"甲方","occurrences":2}` → 期望该字段 `key` 原样为 `PUR_BILL_TO_NAME`（不得改写成小写）、`slot_id="s2"`、`label` 是中文业务名（如「甲方单位名称」）而非 `label_hint` 原文。
+- **`#...#` 占位符模板**：`slots_json` 含 `{"slot_id":"s46","kind":"hash","name":"供应商名称"}` → 期望 `key` 是英文（如 `supplier_name_att`）、`label` 含中文原名，`slot_id` 照抄。
+- **同名标签消歧**：`slots_json` 同时含 `REGIST_ADDR`（owner_hint=甲方）与 `SUPPLIER_ADDR`（owner_hint=乙方），两者 `label_hint` 都是「联系地址」→ 期望两条 `label` 分别补成「甲方联系地址」「乙方联系地址」，不得输出两个同名 label。
+- **无占位符模板**：`doc_outline` 全为固定条款正文（如「第一条 本协议自双方签字之日起生效」），`candidates_json="[]"`、`slots_json="[]"` → 期望 `fields=[]`、`parse_error="false"`、`notes` 说明无需填写字段（不臆造字段）。
+- **候选误报**：`slots_json` 混入一条实为固定条款的槽位 → 期望该条进入 `ignored` 并给出原因，不出现在 `fields`。
+- **非法键/锚点兜底**：令模型故意返回中文 `key` 与不存在的 `anchor` → 期望 `key` 退回槽位原名（没有 name 时才是 `field_N`）、`anchor` 置空，输出仍是合法 JSON。
 - **兜底解析**：令模型输出非 JSON（如「抱歉，我无法完成」）→ 期望 `parse_error="true"`、`fields=[]`，流程不报错。
 
 ### 校验

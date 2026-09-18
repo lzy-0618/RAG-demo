@@ -53,13 +53,15 @@ def _payload(item) -> dict:
 
 
 def _detail_payload(item) -> dict:
-    """复核页上下文：文档大纲 + 候选空位 + 识别过程留痕。"""
+    """复核页上下文：文档大纲 + 候选空位 + 字段槽位 + 识别过程留痕。"""
     outline = ""
     candidates: list[dict] = []
+    slots: list[dict] = []
     try:
         scan = template_scan.scan_document(item.source_path or item.file_path)
         outline = scan.outline
         candidates = template_scan.candidates_for_ai(scan.candidates)
+        slots = template_scan.slots_for_ai(scan.slots)
     except BizError:
         # 原始文件损坏时仍返回模板信息，复核页会提示只有 status/error 可用
         pass
@@ -68,6 +70,7 @@ def _detail_payload(item) -> dict:
         **_base(item),
         outline=outline,
         candidates=candidates,
+        slots=slots,
         meta=meta,
         error=str(meta.get("error") or ""),
     ).model_dump()
@@ -143,7 +146,7 @@ async def list_templates(
 
 @router.post("")
 async def create_template(
-    file: UploadFile = File(..., description=".docx 模板文件"),
+    file: UploadFile = File(..., description=".doc/.docx 模板文件（.doc 会自动转换为 .docx）"),
     name: str | None = Form(None, description="模板名称，默认取文件名"),
     category: str | None = Form(None, description="合同类型，来自类型词表"),
     description: str | None = Form(None),

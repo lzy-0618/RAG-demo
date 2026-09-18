@@ -25,13 +25,13 @@ async def submit_review(
     background_tasks: BackgroundTasks,
     review_type: str = Form(REVIEW_TYPE_CONTRACT, description="contract / regulation"),
     content: str | None = Form(None, description="待审查文本（与 file 二选一）"),
-    file: UploadFile | None = File(None, description="待审查文件 pdf/docx/md/txt"),
+    file: UploadFile | None = File(None, description="待审查文件 pdf/doc/docx/md/txt"),
     db: Session = Depends(get_db),
     current_user: str = Depends(get_current_user),
 ):
     """提交审查任务：文本或文件二选一，返回 task_id 供轮询进度。"""
     file_bytes = await file.read() if file else None
-    task = review_service.create_task(
+    task = await review_service.create_task(
         db,
         review_type=review_type,
         content=content,

@@ -1,13 +1,13 @@
 <script setup lang="ts">
-/** 合同模板库（需求⑥）：导入 .docx → 结构化识别 → 人工复核 → 启用。
+/** 合同模板库（需求⑥）：导入 .doc/.docx → 结构化识别 → 人工复核 → 启用。
  *
  * 模板必须先完成"字段确认"（复核）才会出现在「合同生成」页，
  * 避免把未确认的占位符直接暴露给填表的人。
  */
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { UploadRawFile, UploadUserFile } from 'element-plus'
 import DocxPreview from '@/components/DocxPreview.vue'
+import FileDropzone from '@/components/FileDropzone.vue'
 import TemplateStructureReview from '@/components/TemplateStructureReview.vue'
 import { downloadAuthedFile } from '@/api/download'
 import { useMediaQuery } from '@/composables/useMediaQuery'
@@ -19,10 +19,6 @@ import {
   uploadTemplate,
 } from '@/api/template'
 import type { StructureStatus, TemplateOut } from '@/api/template'
-
-// 占位符文案放在 script 里：模板中直接写 {{ ... }} 会与 Vue 插值语法冲突
-const VAR_PLACEHOLDER = '{{ 变量 }}'
-const VAR_PLACEHOLDER_NAMED = '{{ 变量名 }}'
 
 const STATUS_META: Record<
   StructureStatus,
@@ -51,8 +47,13 @@ const showVars = useMediaQuery('(min-width: 701px)') // 占位变量
 
 const uploadVisible = ref(false)
 const uploading = ref(false)
-const fileList = ref<UploadUserFile[]>([])
+const templateFile = ref<File | null>(null)
 const form = ref({ name: '', category: '', description: '' })
+
+// 模板名默认取文件名；已经填过名字就不覆盖，避免把用户输入冲掉
+watch(templateFile, (file) => {
+  if (file && !form.value.name) form.value.name = file.name.replace(/\.docx?$/i, '')
+})
 
 const previewVisible = ref(false)
 const previewRow = ref<TemplateOut | null>(null)
@@ -76,17 +77,10 @@ async function load() {
   }
 }
 
-function onFileChange(_file: unknown, files: UploadUserFile[]) {
-  fileList.value = files
-  if (!form.value.name && files[0]?.name) {
-    form.value.name = files[0].name.replace(/\.docx$/i, '')
-  }
-}
-
 async function onUpload() {
-  const file = fileList.value[0]?.raw as UploadRawFile | undefined
+  const file = templateFile.value
   if (!file) {
-    ElMessage.warning('请选择 .docx 模板文件')
+    ElMessage.warning('请选择 .doc 或 .docx 模板文件')
     return
   }
   uploading.value = true
@@ -99,7 +93,7 @@ async function onUpload() {
     })
     const created = res.data
     uploadVisible.value = false
-    fileList.value = []
+    templateFile.value = null
     form.value = { name: '', category: '', description: '' }
     page.value = 1
     await load()
@@ -160,7 +154,7 @@ onMounted(load)
         <el-button type="primary" @click="uploadVisible = true">导入模板</el-button>
         <el-button text @click="onSeedCategories">同步类型词表</el-button>
         <el-button text @click="load">刷新</el-button>
-        <span class="meta">.docx 模板 · 完成字段复核后才可用于生成</span>
+        <span class="meta">.doc / .docx 模板 · 完成字段复核后才可用于生成</span>
       </div>
 
       <el-table v-loading="loading" :data="templates" empty-text="暂无模板">
@@ -221,20 +215,12 @@ onMounted(load)
 
     <el-dialog v-model="uploadVisible" title="导入合同模板" width="560px">
       <el-form label-position="top">
-        <el-form-item :label="`模板文件（.docx，可用 ${VAR_PLACEHOLDER_NAMED} 或下划线标记待填内容）`">
-          <el-upload
-            drag
-            :auto-upload="false"
-            :limit="1"
-            :file-list="fileList"
-            :on-change="onFileChange"
-            accept=".docx"
-          >
-            <div class="upload-tip">拖拽 .docx 到此处，或点击选择</div>
-            <div class="upload-hint">
-              模板为含 {{ VAR_PLACEHOLDER }} 占位符或填空痕迹的 .docx；导入后需完成字段识别与复核才可生成合同
-            </div>
-          </el-upload>
+        <el-form-item>
+          <FileDropzone
+            v-model="templateFile"
+            accept=".doc,.docx"
+            hint="单个文件，不超过 20MB"
+          />
         </el-form-item>
         <el-form-item label="模板名称">
           <el-input v-model="form.name" placeholder="如：钢材采购合同模板" />
@@ -306,16 +292,6 @@ onMounted(load)
 /* 变量标签单行不换行，超出由 +N 收纳，避免把行高撑成三行 */
 .var-tag {
   margin: 0 var(--space-1) var(--space-1) 0;
-}
-
-.upload-tip {
-  color: var(--ink-2);
-}
-
-.upload-hint {
-  margin-top: var(--space-2);
-  font-size: var(--fs-xs);
-  color: var(--muted);
 }
 
 .hint {

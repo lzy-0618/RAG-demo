@@ -129,6 +129,12 @@ workflow:
               required: false
               type: paragraph
               variable: candidates_json
+            - label: 字段槽位清单 JSON（同名变量已合并，一个槽位一个字段）
+              max_length: null
+              options: []
+              required: false
+              type: paragraph
+              variable: slots_json
             - label: 模板名称
               max_length: null
               options: []
@@ -166,7 +172,7 @@ workflow:
           prompt_template:
             - role: system
               text: |
-                你是企业合同模板结构化专家。后端已把用户导入的合同模板 .docx 扫描成「文档结构大纲」与「候选空位清单」，你的任务是通读大纲，识别出模板中需要填写的字段，并输出结构化的字段清单 JSON。
+                你是企业合同模板结构化专家。后端已把用户导入的合同模板 .docx 扫描成「文档结构大纲」「候选空位清单」与「字段槽位清单」，你的任务是识别出模板中需要填写的字段，并输出结构化的字段清单 JSON。
 
                 【输入】
                 模板名称：{{#start.template_name#}}
@@ -174,23 +180,36 @@ workflow:
                 {{#start.doc_outline#}}
                 候选空位清单 JSON（后端用规则扫描出的疑似空位，可能含误报或漏报，仅作参考）：
                 {{#start.candidates_json#}}
+                字段槽位清单 JSON（**这是你的判断单位**，一个槽位对应一个待填变量）：
+                {{#start.slots_json#}}
+
+                【占位符形态】合同模板里的待填位置只有这几种，都可能出现，都要识别：
+                - `form_field`：Word 表单域，`name` 就是模板里写好的变量名（如 PUR_BILL_TO_NAME、DTK9980、TAX_RATE）。
+                - `hash`：`#...#` 形态的占位符，`name` 是井号里的文字（如 `致#供应商名称#：` 的 name 是「供应商名称」）。这类内文常常是中文，key 需要你自己起一个英文名。
+                - `jinja`：已经是 `{{ 变量 }}` 的地方。
+                - `blank` / `label_empty` / `empty_cell`：下划线填空、「标签：」后为空、表格空单元格。这些没有 name。
 
                 【识别要求】
-                1. 以文档结构大纲为准通读全文，结合候选空位清单判断每个空位的语义（如甲方名称、乙方名称、合同金额、签订日期、付款方式、履约地点等）。
-                2. anchor 只能取大纲中出现过的锚点编号（如 p1、p3），不得编造。
-                3. key 必须是合法的 Jinja 标识符：只允许英文/拼音字母、数字与下划线，且以字母或下划线开头，匹配 ^[A-Za-z_][A-Za-z0-9_]*$。禁止中文、空格、连字符。
-                4. type 只能取以下五种之一：text（单行文本）、textarea（多行文本）、date（日期）、number（数字）、select（枚举，此时必须在 options 中列出候选项）。
-                5. required：合同成立与履行必需的字段（如双方名称、标的、金额、日期）为 true，可选补充项为 false。
-                6. 候选清单中的误报（实为固定条款正文、已有内容的说明文字、表头等）放入 ignored，并写明原因。
-                7. confidence 用 0~1 表示识别置信度，reason 用一句话说明判断依据（尽量引用原文片段）。
-                8. notes 用一句话总结本次识别结果。
+                1. **以槽位清单为准逐个输出，一个槽位一个字段，不得合并、不得遗漏、不得为同一个槽位输出多条。** 大纲用来理解上下文，不要按「行」去数字段——一个段落里可能有多个变量（例如通知条款里 8 个、生效期限里 9 个），必须分别输出。
+                2. 槽位带 `name` 时（form_field / hash），**key 必须原样沿用这个 name**，不得改写成小写或自创名字：`PUR_BILL_TO_NAME` 就输出 `PUR_BILL_TO_NAME`，`DTK9980` 就输出 `DTK9980`。这些名字来自甲方既有模板体系，改名会导致生成的合同对不上他们的数据字段。只有 `hash` 的 name 是中文（不符合 Jinja 标识符规则）时，才另起一个英文 key，并把中文原名填进 `label`。
+                3. label 用**中文业务含义**，取上下文里的标签文字并结合语义补全。要写得能分清是谁的字段：
+                   - `label_hint` 只是原文里紧挨着的几个字，常常不完整（例如只有「微信号」「联系地址」），你必须结合 `owner` 补全成「甲方微信号」「乙方联系地址」这种**全局唯一**的名字。
+                   - 不能出现两个字段 label 完全相同。
+                4. owner 是字段归属的主体，取「甲方」「乙方」「附件」之一，判断不出就留空字符串。`owner_hint` 是后端给的提示，**可能不准**（同时提到甲乙双方的条款里容易误判），以你自己的判断为准。
+                5. slot_id 必须原样照抄槽位清单里的 slot_id。
+                6. key 必须是合法的 Jinja 标识符：只允许英文/拼音字母、数字与下划线，且以字母或下划线开头，匹配 ^[A-Za-z_][A-Za-z0-9_]*$。禁止中文、空格、连字符。
+                7. type 只能取以下五种之一：text（单行文本）、textarea（多行文本）、date（日期）、number（数字）、select（枚举，此时必须在 options 中列出候选项）。按语义推断：日期类（签订日期、履行期限的年月日）用 date；金额、天数、份数、税率、比例用 number；「第__种方式」这类有限选项用 select。
+                8. required：合同成立与履行必需的字段（如双方名称、标的、金额、日期）为 true，可选补充项为 false。
+                9. 确实不该填的槽位（实为固定条款正文、表头、附件里的空白单元格等）放进 ignored，写明原因。
+                10. confidence 用 0~1 表示识别置信度，reason 用一句话说明判断依据（尽量引用原文片段）。
+                11. notes 用一句话总结本次识别结果。
 
                 【输出格式】
                 只输出一个 JSON 对象，不要输出任何解释或多余文字，结构如下：
-                {"contract_type": "采购", "fields": [{"key": "party_a_name", "label": "甲方名称", "type": "text", "required": true, "anchor": "p1", "default": "", "options": [], "confidence": 0.96, "reason": "『甲方（采购方）：』后为空"}], "ignored": [{"anchor": "p5", "reason": "已有固定条款正文"}], "notes": "识别到 8 个待填字段"}
+                {"contract_type": "采购", "fields": [{"key": "PUR_BILL_TO_NAME", "label": "甲方单位名称", "type": "text", "required": true, "slot_id": "s2", "owner": "甲方", "default": "", "options": [], "confidence": 0.96, "reason": "模板表单域名为 PUR_BILL_TO_NAME，位于『甲方：』之后"}], "ignored": [{"slot_id": "s30", "reason": "已有固定条款正文"}], "notes": "识别到 37 个待填字段"}
             - role: user
               text: |
-                请通读上述合同模板的文档结构大纲，结合候选空位清单，输出待填字段清单 JSON。
+                请通读上述合同模板的文档结构大纲，结合字段槽位清单，**逐个槽位**输出待填字段清单 JSON。注意：一个槽位只输出一个字段，带 name 的槽位 key 必须原样沿用 name，label 要带主体前缀以保证全局唯一。
           retry_config:
             enabled: false
             exponential_backoff:
@@ -303,7 +322,7 @@ workflow:
                 return False
 
 
-            def main(llm_output: str, candidates_json: str, doc_outline: str) -> dict:
+            def main(llm_output: str, candidates_json: str, doc_outline: str, slots_json: str) -> dict:
                 anchors = set(ANCHOR_RE.findall(doc_outline or ""))
                 try:
                     candidates = json.loads(candidates_json or "")
@@ -312,6 +331,17 @@ workflow:
                     for item in candidates if isinstance(candidates, list) else []:
                         if isinstance(item, dict) and item.get("anchor"):
                             anchors.add(_s(item.get("anchor")))
+                except Exception:
+                    pass
+
+                # 槽位是字段的身份：同名变量在扫描阶段已合并成一个槽位。这里把槽位读进来，
+                # 用来校验模型给的 slot_id 并补齐全部落点（一处填写、多处生效）。
+                slots = {}
+                try:
+                    parsed = json.loads(slots_json or "")
+                    for item in parsed if isinstance(parsed, list) else []:
+                        if isinstance(item, dict) and item.get("slot_id"):
+                            slots[_s(item["slot_id"])] = item
                 except Exception:
                     pass
 
@@ -327,12 +357,20 @@ workflow:
                 for index, raw in enumerate(data.get("fields") or []):
                     if not isinstance(raw, dict):
                         continue
+
+                    # 先绑槽位：槽位能提供原名、主体与全部落点，比模型自己写的更可靠
+                    slot = slots.get(_s(raw.get("slot_id")).strip())
+                    source_name = _s(raw.get("source_name")).strip() or _s((slot or {}).get("name")).strip()
+
                     key = _s(raw.get("key")).strip()
-                    if not KEY_RE.match(key) or key in used:
-                        key = "field_%d" % (index + 1)
-                    while key in used:
-                        key = key + "_"
+                    if not KEY_RE.match(key):
+                        # key 非法时用模板原名或槽位名兜底，再退到序号
+                        fallback = source_name if KEY_RE.match(source_name) else ""
+                        key = fallback or "field_%d" % (index + 1)
+                    if key in used:
+                        key = "%s_%d" % (key, index + 1)
                     used.add(key)
+
                     field_type = _s(raw.get("type")).strip().lower()
                     field_type = TYPE_ALIASES.get(field_type, field_type)
                     if field_type not in ALLOWED_TYPES:
@@ -344,6 +382,11 @@ workflow:
                     anchor = _s(raw.get("anchor")).strip()
                     if anchors and anchor not in anchors:
                         anchor = ""
+                    owner = _s(raw.get("owner")).strip() or _s((slot or {}).get("owner_hint")).strip()
+                    candidate_ids = raw.get("candidate_ids")
+                    candidate_ids = (
+                        [_s(item) for item in candidate_ids] if isinstance(candidate_ids, list) else []
+                    )
                     try:
                         confidence = max(0.0, min(1.0, float(raw.get("confidence"))))
                     except Exception:
@@ -354,6 +397,10 @@ workflow:
                         "type": field_type,
                         "required": _b(raw.get("required")),
                         "anchor": anchor,
+                        "slot_id": _s(raw.get("slot_id")).strip() if slot else "",
+                        "owner": owner,
+                        "source_name": source_name,
+                        "candidate_ids": candidate_ids,
                         "default": _s(raw.get("default")),
                         "options": options,
                         "confidence": round(confidence, 4),
@@ -363,9 +410,13 @@ workflow:
                 ignored = []
                 for raw in data.get("ignored") or []:
                     if isinstance(raw, dict):
-                        ignored.append({"anchor": _s(raw.get("anchor")), "reason": _s(raw.get("reason"))})
+                        ignored.append({
+                            "slot_id": _s(raw.get("slot_id")),
+                            "anchor": _s(raw.get("anchor")),
+                            "reason": _s(raw.get("reason")),
+                        })
                     elif raw:
-                        ignored.append({"anchor": "", "reason": _s(raw)})
+                        ignored.append({"slot_id": "", "anchor": "", "reason": _s(raw)})
 
                 result = {
                     "contract_type": _s(data.get("contract_type")),
@@ -399,6 +450,10 @@ workflow:
                 - start
                 - doc_outline
               variable: doc_outline
+            - value_selector:
+                - start
+                - slots_json
+              variable: slots_json
         height: 200
         id: code_parse
         position: {x: 720, y: 300}

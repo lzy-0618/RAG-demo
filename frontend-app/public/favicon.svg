@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="8" fill="#b3342a"/>
+  <rect x="9.5" y="9.5" width="45" height="45" rx="3" fill="none" stroke="#faf8f5" stroke-width="2.5"/>
+  <text x="32" y="43.5" text-anchor="middle" font-family="Songti SC, Noto Serif CJK SC, SimSun, serif" font-size="30" font-weight="600" fill="#faf8f5">合</text>
+</svg>

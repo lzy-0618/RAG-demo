@@ -54,8 +54,14 @@ class Settings(BaseSettings):
     # 知识库 / 向量
     EMBEDDING_MODEL: str = ""
 
-    # CORS（开发期允许本地前端）
-    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    # CORS（开发期允许本地前端；含 Capacitor App 内嵌 WebView 的 Origin）
+    CORS_ORIGINS: list[str] = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        # App 端 WebView 的页面源：Android 为 https://localhost，iOS 为 capacitor://localhost
+        "https://localhost",
+        "capacitor://localhost",
+    ]
 
     # 文件上传
     UPLOAD_DIR: str = "uploads"

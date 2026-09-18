@@ -11,7 +11,16 @@ export interface TemplateField {
   default: string
   options: string[]
   anchor: string
+  /** 该变量的全部落点：同名变量（表单域重名 / 文本框 Choice 与 Fallback 副本）会写多处 */
+  anchors: string[]
   candidate_id: string
+  candidate_ids: string[]
+  /** 字段槽位 id：同名变量共用一个槽位，保存后重新回写靠它补齐全部落点 */
+  slot_id: string
+  /** 模板里的原名，如 FORMTEXT 域结果 PUR_BILL_TO_NAME、#...# 里的中文 */
+  source_name: string
+  /** 主体（甲方 / 乙方 / 附件），用于消解中文标签重名 */
+  owner: string
   paragraph_text: string
   confidence: number
   reason: string
@@ -42,6 +51,8 @@ export interface TemplateCandidate {
   id: string
   anchor: string
   kind: string
+  /** 具名占位符的原名（表单域结果 PUR_BILL_TO_NAME / #...# 内文），无名候选为空串 */
+  name: string
   text: string
   context: string
   before: string
@@ -49,9 +60,22 @@ export interface TemplateCandidate {
   header: string
 }
 
+/** 字段槽位：同名变量已合并，是 AI 识别的判断单位 */
+export interface TemplateSlot {
+  slot_id: string
+  kind: string
+  name: string
+  label_hint: string
+  owner_hint: string
+  header: string
+  occurrences: number
+  contexts: string[]
+}
+
 export interface TemplateDetail extends TemplateOut {
   outline: string
   candidates: TemplateCandidate[]
+  slots: TemplateSlot[]
   meta: Record<string, unknown>
   error: string
 }

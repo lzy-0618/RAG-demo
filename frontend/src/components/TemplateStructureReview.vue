@@ -31,6 +31,21 @@ const FIELD_TYPES = [
   { value: 'checkbox', label: '勾选' },
 ]
 
+/** 候选类型 → 中文。给复核人看「这处空位是怎么被找到的」，比显示英文 kind 有用 */
+const KIND_LABELS: Record<string, string> = {
+  form_field: '表单域',
+  hash: '#占位符',
+  jinja: '已有占位符',
+  sdt: '内容控件',
+  blank: '下划线填空',
+  label_empty: '空标签',
+  empty_cell: '空单元格',
+}
+
+function kindLabel(kind: string): string {
+  return KIND_LABELS[kind] ?? kind
+}
+
 const STATUS_META: Record<string, { text: string; type: 'success' | 'warning' | 'danger' | 'info' }> = {
   pending: { text: '待识别', type: 'info' },
   structuring: { text: '识别中', type: 'warning' },
@@ -55,7 +70,10 @@ const visible = computed({
 })
 
 const statusMeta = computed(() => STATUS_META[detail.value?.structure_status ?? 'pending'])
-const usedCandidates = computed(() => new Set(fields.value.map((f) => f.candidate_id).filter(Boolean)))
+// 一个字段可能有多个落点，全部算"已占用"，否则手动补字段时会重复挑到同一处
+const usedCandidates = computed(
+  () => new Set(fields.value.flatMap((f) => [...(f.candidate_ids ?? []), f.candidate_id]).filter(Boolean)),
+)
 const unusedCandidates = computed<TemplateCandidate[]>(
   () => (detail.value?.candidates ?? []).filter((c) => !usedCandidates.value.has(c.id)),
 )
@@ -136,14 +154,20 @@ function addField() {
   const candidate = unusedCandidates.value.find((c) => c.id === addCandidateId.value)
   const index = fields.value.length + 1
   fields.value.push({
-    key: `field_${index}`,
+    // 具名候选（表单域 / #占位符）沿用模板原名做 key，与 AI 识别路径保持一致
+    key: candidate?.name || `field_${index}`,
     label: candidate ? fieldLabelFromCandidate(candidate) : '',
-    type: candidate?.kind === 'empty_cell' ? 'text' : 'text',
+    type: 'text',
     required: false,
     default: '',
     options: [],
     anchor: candidate?.anchor ?? '',
+    anchors: candidate ? [candidate.anchor] : [],
     candidate_id: candidate?.id ?? '',
+    candidate_ids: candidate ? [candidate.id] : [],
+    slot_id: '',
+    source_name: candidate?.name ?? '',
+    owner: '',
     paragraph_text: candidate?.context ?? '',
     confidence: 0,
     reason: '',
@@ -153,9 +177,16 @@ function addField() {
 
 function fieldLabelFromCandidate(candidate: TemplateCandidate): string {
   if (candidate.header) return candidate.header
+  // 有原名时用它更直白（#供应商名称# → 供应商名称）
+  if (candidate.name) return candidate.name
   const text = candidate.context || candidate.text
   const match = text.match(/^(.{1,20}?)[：:]/)
   return match ? match[1] : text.slice(0, 12)
+}
+
+/** 字段落点数量：大于 1 表示同一个变量在文档里出现多处，填一次多处生效 */
+function occurrenceCount(field: TemplateField): number {
+  return (field.candidate_ids ?? []).length || (field.candidate_id ? 1 : 0)
 }
 
 function removeField(index: number) {
@@ -259,7 +290,7 @@ watch(
             <el-option
               v-for="candidate in unusedCandidates"
               :key="candidate.id"
-              :label="`${candidate.kind} · ${(candidate.context || candidate.text || '空单元格').slice(0, 28)}`"
+              :label="`${kindLabel(candidate.kind)} · ${(candidate.name || candidate.context || candidate.text || '空单元格').slice(0, 28)}`"
               :value="candidate.id"
             />
           </el-select>
@@ -268,14 +299,19 @@ watch(
         </div>
 
         <el-table :data="fields" size="small" height="42vh" empty-text="暂无字段，请先识别或手动添加">
+          <el-table-column label="变量名" width="180">
+            <template #default="{ row }">
+              <!-- 模板原名就是占位符名（表单域 / #占位符 沿用甲方既有字段码），只读展示 -->
+              <span class="var-name">{{ row.key }}</span>
+              <el-tag v-if="row.owner" size="small" class="owner-tag" type="info">{{ row.owner }}</el-tag>
+              <span v-if="occurrenceCount(row) > 1" class="occurrence" :title="`文档中出现 ${occurrenceCount(row)} 处，填一次多处生效`">
+                ×{{ occurrenceCount(row) }}
+              </span>
+            </template>
+          </el-table-column>
           <el-table-column label="中文标签" width="140">
             <template #default="{ row }">
               <el-input v-model="row.label" size="small" />
-            </template>
-          </el-table-column>
-          <el-table-column label="字段键" width="130">
-            <template #default="{ row }">
-              <el-input v-model="row.key" size="small" class="mono-input" placeholder="英文/拼音" />
             </template>
           </el-table-column>
           <el-table-column label="类型" width="140">
@@ -307,11 +343,6 @@ watch(
           <el-table-column label="默认值" width="90">
             <template #default="{ row }">
               <el-input v-model="row.default" size="small" />
-            </template>
-          </el-table-column>
-          <el-table-column label="来源（文档原文）" min-width="140" show-overflow-tooltip>
-            <template #default="{ row }">
-              <span class="hint">{{ row.paragraph_text || row.reason || '—' }}</span>
             </template>
           </el-table-column>
           <!-- 不加 fixed：对话框内宽度有限，溢出时整体横向滚动，好过固定列盖住数据 -->
@@ -402,14 +433,25 @@ watch(
   width: 100%;
 }
 
-.options-input {
-  margin-top: var(--space-1);
+.var-name {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-xs);
+  word-break: break-all;
 }
 
-/* 字段键是机器标识，用等宽字体与中文标签区分 */
-.mono-input :deep(.el-input__inner) {
-  font-family: var(--font-mono);
-  font-size: var(--fs-sm);
+.owner-tag {
+  margin-left: var(--space-1);
+}
+
+/* 同一个变量在文档里出现多处时提示"填一次多处生效" */
+.occurrence {
+  margin-left: var(--space-1);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.options-input {
+  margin-top: var(--space-1);
 }
 
 .footer-hint {

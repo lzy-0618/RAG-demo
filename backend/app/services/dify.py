@@ -10,6 +10,7 @@ from typing import AsyncGenerator
 import httpx
 
 from app.core.config import settings
+from app.core.exceptions import BizError
 
 
 class DifyClient:
@@ -28,10 +29,13 @@ class DifyClient:
         """同步（blocking）执行工作流，适用于合同审查等需要完整结果多步推理的场景。"""
         url = f"{self.base_url}/v1/workflows/run"
         body = {"inputs": inputs, "response_mode": response_mode, "user": user}
-        async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT) as client:
-            resp = await client.post(url, json=body, headers=self._headers(api_key))
-            resp.raise_for_status()
-            return resp.json()
+        try:
+            async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT) as client:
+                resp = await client.post(url, json=body, headers=self._headers(api_key))
+        except httpx.RequestError as exc:
+            raise _unreachable("执行 Dify 工作流", exc) from exc
+        _ensure_ok(resp, "执行 Dify 工作流")
+        return resp.json()
 
     async def run_workflow_stream(
         self, api_key: str, inputs: dict, user: str
@@ -39,14 +43,17 @@ class DifyClient:
         """流式执行工作流，逐条 yield Dify SSE 事件的 JSON。"""
         url = f"{self.base_url}/v1/workflows/run"
         body = {"inputs": inputs, "response_mode": "streaming", "user": user}
-        async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT) as client:
-            async with client.stream(
-                "POST", url, json=body, headers=self._headers(api_key)
-            ) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if line.startswith("data:"):
-                        yield _parse_sse_data(line)
+        try:
+            async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT) as client:
+                async with client.stream(
+                    "POST", url, json=body, headers=self._headers(api_key)
+                ) as resp:
+                    _ensure_ok(resp, "流式执行 Dify 工作流")
+                    async for line in resp.aiter_lines():
+                        if line.startswith("data:"):
+                            yield _parse_sse_data(line)
+        except httpx.RequestError as exc:
+            raise _unreachable("流式执行 Dify 工作流", exc) from exc
 
     async def run_template_structure(
         self,
@@ -54,19 +61,25 @@ class DifyClient:
         *,
         doc_outline: str,
         candidates_json: str,
+        slots_json: str = "",
         template_name: str,
         user: str,
     ) -> dict:
         """执行「合同模板结构化」工作流（应用六），返回 outputs。
 
-        输入是后端扫描出的文档结构大纲与候选空位清单，输出是待填字段清单 JSON
-        （fields_json）与解析失败标志（parse_error）。
+        输入是后端扫描出的文档结构大纲、候选空位清单与字段槽位清单，输出是待填字段清单
+        JSON（fields_json）与解析失败标志（parse_error）。
+
+        `slots_json` 是 P1 新增的入参（同名变量已合并成槽位）；老版本的 Dify 应用没有这个
+        变量，传进去会被忽略，所以这里给默认空值——后端仍按锚点回退解析。
         """
         inputs = {
             "doc_outline": doc_outline,
             "candidates_json": candidates_json,
             "template_name": template_name,
         }
+        if slots_json:
+            inputs["slots_json"] = slots_json
         result = await self.run_workflow(api_key=api_key, inputs=inputs, user=user)
         return (result.get("data") or {}).get("outputs") or {}
 
@@ -87,10 +100,13 @@ class DifyClient:
             "user": user,
             "conversation_id": conversation_id,
         }
-        async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT) as client:
-            resp = await client.post(url, json=body, headers=self._headers(api_key))
-            resp.raise_for_status()
-            return resp.json()
+        try:
+            async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT) as client:
+                resp = await client.post(url, json=body, headers=self._headers(api_key))
+        except httpx.RequestError as exc:
+            raise _unreachable("Dify 对话", exc) from exc
+        _ensure_ok(resp, "Dify 对话")
+        return resp.json()
 
     async def chat_stream(
         self,
@@ -109,14 +125,17 @@ class DifyClient:
             "user": user,
             "conversation_id": conversation_id,
         }
-        async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT) as client:
-            async with client.stream(
-                "POST", url, json=body, headers=self._headers(api_key)
-            ) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if line.startswith("data:"):
-                        yield _parse_sse_data(line)
+        try:
+            async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT) as client:
+                async with client.stream(
+                    "POST", url, json=body, headers=self._headers(api_key)
+                ) as resp:
+                    _ensure_ok(resp, "流式 Dify 对话")
+                    async for line in resp.aiter_lines():
+                        if line.startswith("data:"):
+                            yield _parse_sse_data(line)
+        except httpx.RequestError as exc:
+            raise _unreachable("流式 Dify 对话", exc) from exc
 
     async def upload_file(self, api_key: str, file_path: str, file_name: str, user: str = "rag-demo") -> dict:
         """上传独立文件到 Dify（/v1/files/upload）。
@@ -126,13 +145,16 @@ class DifyClient:
         """
         url = f"{self.base_url}/v1/files/upload"
         headers = {"Authorization": f"Bearer {api_key or settings.DIFY_API_KEY}"}
-        async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT) as client:
-            with open(file_path, "rb") as f:
-                files = {"file": (file_name, f, "application/octet-stream")}
-                data = {"user": user}
-                resp = await client.post(url, headers=headers, data=data, files=files)
-                resp.raise_for_status()
-                return resp.json()
+        try:
+            async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT) as client:
+                with open(file_path, "rb") as f:
+                    files = {"file": (file_name, f, "application/octet-stream")}
+                    data = {"user": user}
+                    resp = await client.post(url, headers=headers, data=data, files=files)
+        except httpx.RequestError as exc:
+            raise _unreachable("上传文件到 Dify", exc) from exc
+        _ensure_ok(resp, "上传文件到 Dify")
+        return resp.json()
 
     async def get_dataset(self, api_key: str, dataset_id: str) -> dict:
         """查询知识库详情（含 doc_form 等分段结构设置）。
@@ -337,15 +359,57 @@ def _parse_sse_data(line: str) -> dict:
 
 
 def _ensure_ok(resp: httpx.Response, action: str) -> None:
-    """知识库接口的错误处理：把 Dify 的响应体带进异常，便于定位 400 原因。
+    """把 Dify 的 HTTP 错误翻译成带排查线索的 BizError。
 
-    Dify 的 400 形如 {"code":"invalid_param","message":"doc_form is different ..."}，
-    只抛状态码会让排查变成猜谜。
+    Dify 的错误体信息量很大（400 形如 `{"code":"invalid_param","message":"..."}`），
+    直接 `raise_for_status()` 既丢掉它、又变成未处理异常：前端只显示
+    「Request failed with status code 500」，`structure_meta_json` 里也只剩一条英文
+    httpx 消息，排查时看不出该改哪里。
+
+    这里**刻意不用 `AuthError`（HTTP 401）**：那是"平台用户未登录"的语义，前端拦截器
+    收到 401 会清 token 并跳登录页（见 frontend/src/api/http.ts）。Dify 密钥失效与平台
+    登录毫无关系，用它会把用户莫名其妙踢下线——所以统一走 BizError（400 + 可读 message）。
     """
     if resp.status_code < 400:
         return
-    detail = resp.text[:500].replace("\n", " ")
-    raise RuntimeError(f"{action}失败（HTTP {resp.status_code}）：{detail}")
+
+    detail = ""
+    try:
+        body = resp.json()
+        if isinstance(body, dict):
+            detail = str(body.get("message") or body.get("code") or "").strip()
+    except Exception:  # noqa: BLE001 - 出错信息取不到不该再抛异常
+        try:
+            detail = (resp.text or "").strip()
+        except Exception:  # noqa: BLE001 - 流式响应未读取时取不到正文
+            detail = ""
+    detail = detail.replace("\n", " ")[:300]
+
+    if resp.status_code in (401, 403):
+        raise BizError(
+            message=(
+                f"{action}失败：Dify 拒绝访问（HTTP {resp.status_code}）。"
+                "该应用密钥无效或已被重置——在 Dify 重新导入 DSL 会生成新密钥，"
+                "请核对 .env 里对应应用的 *_APP_KEY 并重启后端进程"
+                "（.env 只在进程启动时读取，改完不重启不生效）"
+                + (f"。Dify 说明：{detail}" if detail else "")
+            )
+        )
+    if resp.status_code == 404:
+        raise BizError(
+            message=f"{action}失败：Dify 接口或应用不存在（HTTP 404）"
+            + (f"：{detail}" if detail else "")
+        )
+    raise BizError(
+        message=f"{action}失败（HTTP {resp.status_code}）" + (f"：{detail}" if detail else "")
+    )
+
+
+def _unreachable(action: str, exc: Exception) -> BizError:
+    """连不上 Dify（容器没起、端口不通）：同样要给可读原因，而不是 500。"""
+    return BizError(
+        message=f"{action}失败：连不上 Dify（{settings.DIFY_BASE_URL}）：{exc}"
+    )
 
 
 dify_client = DifyClient()
