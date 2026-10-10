@@ -13,6 +13,17 @@ from app.core.config import settings
 from app.core.exceptions import BizError
 
 
+def _client() -> httpx.AsyncClient:
+    """构造访问 Dify 的 HTTP 客户端：**一律不走代理**。
+
+    httpx 默认 `trust_env=True`，会读取系统代理设置；macOS 上走的是 `urllib.getproxies()`，
+    它连「例外列表」（localhost / 127.0.0.1 / 内网段）都不认。于是本机开着 Clash 之类的
+    代理时，后端到 Dify 的请求会被送去代理，代理再回 502/404——现象是「curl 直连 Dify 正常、
+    后端却报 Dify 应用不存在」，极难排查。Dify 是内网/本机服务，固定直连。
+    """
+    return httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT, trust_env=False)
+
+
 class DifyClient:
     def __init__(self) -> None:
         self.base_url = settings.DIFY_BASE_URL.rstrip("/")
@@ -30,7 +41,7 @@ class DifyClient:
         url = f"{self.base_url}/v1/workflows/run"
         body = {"inputs": inputs, "response_mode": response_mode, "user": user}
         try:
-            async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT) as client:
+            async with _client() as client:
                 resp = await client.post(url, json=body, headers=self._headers(api_key))
         except httpx.RequestError as exc:
             raise _unreachable("执行 Dify 工作流", exc) from exc
@@ -44,7 +55,7 @@ class DifyClient:
         url = f"{self.base_url}/v1/workflows/run"
         body = {"inputs": inputs, "response_mode": "streaming", "user": user}
         try:
-            async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT) as client:
+            async with _client() as client:
                 async with client.stream(
                     "POST", url, json=body, headers=self._headers(api_key)
                 ) as resp:
@@ -101,7 +112,7 @@ class DifyClient:
             "conversation_id": conversation_id,
         }
         try:
-            async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT) as client:
+            async with _client() as client:
                 resp = await client.post(url, json=body, headers=self._headers(api_key))
         except httpx.RequestError as exc:
             raise _unreachable("Dify 对话", exc) from exc
@@ -126,7 +137,7 @@ class DifyClient:
             "conversation_id": conversation_id,
         }
         try:
-            async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT) as client:
+            async with _client() as client:
                 async with client.stream(
                     "POST", url, json=body, headers=self._headers(api_key)
                 ) as resp:
@@ -146,7 +157,7 @@ class DifyClient:
         url = f"{self.base_url}/v1/files/upload"
         headers = {"Authorization": f"Bearer {api_key or settings.DIFY_API_KEY}"}
         try:
-            async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT) as client:
+            async with _client() as client:
                 with open(file_path, "rb") as f:
                     files = {"file": (file_name, f, "application/octet-stream")}
                     data = {"user": user}
@@ -163,7 +174,7 @@ class DifyClient:
         否则 Dify 返回 400「doc_form is different from the dataset doc_form」。
         """
         url = f"{self.base_url}/v1/datasets/{dataset_id}"
-        async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT) as client:
+        async with _client() as client:
             resp = await client.get(url, headers=self._headers(api_key))
             _ensure_ok(resp, "查询知识库详情")
             return resp.json()
@@ -210,7 +221,7 @@ class DifyClient:
             body["doc_form"] = doc_form
         if process_rule:
             body["process_rule"] = process_rule
-        async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT) as client:
+        async with _client() as client:
             resp = await client.post(url, json=body, headers=self._headers(api_key))
             _ensure_ok(resp, "创建文本文档")
             return resp.json()
@@ -236,7 +247,7 @@ class DifyClient:
         if process_rule:
             config["process_rule"] = process_rule
         headers = {"Authorization": f"Bearer {api_key or settings.DIFY_API_KEY}"}
-        async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT) as client:
+        async with _client() as client:
             with open(file_path, "rb") as f:
                 files = {"file": (file_name, f, mime_type)}
                 data = {"data": json.dumps(config, ensure_ascii=False)}
@@ -257,7 +268,7 @@ class DifyClient:
         params: dict = {"page": page, "limit": limit}
         if keyword:
             params["keyword"] = keyword
-        async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT) as client:
+        async with _client() as client:
             resp = await client.get(url, params=params, headers=self._headers(api_key))
             _ensure_ok(resp, "查询文档列表")
             return resp.json()
@@ -265,7 +276,7 @@ class DifyClient:
     async def get_document(self, api_key: str, dataset_id: str, document_id: str) -> dict:
         """查询单个文档详情（含索引状态）。"""
         url = f"{self.base_url}/v1/datasets/{dataset_id}/documents/{document_id}"
-        async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT) as client:
+        async with _client() as client:
             resp = await client.get(url, headers=self._headers(api_key))
             _ensure_ok(resp, "查询文档详情")
             return resp.json()
@@ -276,7 +287,7 @@ class DifyClient:
         batch 为 create_document_by_* 返回值中的 batch 字段。
         """
         url = f"{self.base_url}/v1/datasets/{dataset_id}/documents/{batch_id}/indexing-status"
-        async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT) as client:
+        async with _client() as client:
             resp = await client.get(url, headers=self._headers(api_key))
             _ensure_ok(resp, "查询索引状态")
             return resp.json()
@@ -298,7 +309,7 @@ class DifyClient:
             body["doc_form"] = doc_form
         if process_rule:
             body["process_rule"] = process_rule
-        async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT) as client:
+        async with _client() as client:
             resp = await client.post(url, json=body, headers=self._headers(api_key))
             _ensure_ok(resp, "更新文本文档")
             return resp.json()
@@ -322,7 +333,7 @@ class DifyClient:
         if process_rule:
             config["process_rule"] = process_rule
         headers = {"Authorization": f"Bearer {api_key or settings.DIFY_API_KEY}"}
-        async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT) as client:
+        async with _client() as client:
             with open(file_path, "rb") as f:
                 files = {"file": (file_name, f, mime_type)}
                 data = {"data": json.dumps(config, ensure_ascii=False)}
@@ -333,7 +344,7 @@ class DifyClient:
     async def delete_document(self, api_key: str, dataset_id: str, document_id: str) -> dict:
         """删除知识库文档（Dify 成功时返回 204 无响应体，需同步删除本地记录）。"""
         url = f"{self.base_url}/v1/datasets/{dataset_id}/documents/{document_id}"
-        async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT) as client:
+        async with _client() as client:
             resp = await client.delete(url, headers=self._headers(api_key))
             _ensure_ok(resp, "删除文档")
             return resp.json() if resp.status_code != 204 and resp.content else {}
@@ -341,7 +352,7 @@ class DifyClient:
     async def list_datasets(self, page: int = 1, limit: int = 100) -> dict:
         """列出知识库（数据集），用于联通性检查与知识库维护（需知识库 API Key）。"""
         url = f"{self.base_url}/v1/datasets"
-        async with httpx.AsyncClient(timeout=settings.DIFY_TIMEOUT) as client:
+        async with _client() as client:
             resp = await client.get(
                 url, params={"page": page, "limit": limit}, headers=self._headers()
             )

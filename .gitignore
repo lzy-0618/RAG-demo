@@ -30,6 +30,8 @@ outputs/
 backend/templates/
 # PDF 预览缓存 + LibreOffice profile（内含生成的 fontconfig）
 backend/var/
+# 启动脚本（start.command）的运行期产物：日志与 PID
+.run/
 
 # === Node / 前端 ===
 node_modules/
