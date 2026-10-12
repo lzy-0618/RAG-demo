@@ -11,7 +11,7 @@ const props = defineProps<{
   reviewType: 'contract' | 'regulation'
 }>()
 
-const inputMode = ref<'text' | 'file'>('text')
+const inputMode = ref<'text' | 'file'>(props.reviewType === 'contract' ? 'file' : 'text')
 const content = ref('')
 const reviewFile = ref<File | null>(null)
 const submitting = ref(false)
@@ -28,20 +28,22 @@ const progress = computed(() => {
   return Math.round(((t.completed_chunks + t.failed_chunks) / t.total_chunks) * 100)
 })
 const canSubmit = computed(() =>
-  inputMode.value === 'text' ? content.value.trim().length > 0 : !!reviewFile.value,
+  props.reviewType === 'contract' || inputMode.value === 'file'
+    ? !!reviewFile.value
+    : content.value.trim().length > 0,
 )
 
 async function onSubmit() {
   if (!canSubmit.value || submitting.value) {
-    ElMessage.warning(inputMode.value === 'text' ? '请输入待审查文本' : '请选择待审查文件')
+    ElMessage.warning(props.reviewType === 'contract' || inputMode.value === 'file' ? '请选择待审查文件' : '请输入待审查文本')
     return
   }
   submitting.value = true
   try {
     const res = await submitReview({
       reviewType: props.reviewType,
-      content: inputMode.value === 'text' ? content.value : undefined,
-      file: inputMode.value === 'file' ? (reviewFile.value ?? undefined) : undefined,
+      content: props.reviewType === 'regulation' && inputMode.value === 'text' ? content.value : undefined,
+      file: props.reviewType === 'contract' || inputMode.value === 'file' ? (reviewFile.value ?? undefined) : undefined,
     })
     ElMessage.success('已提交审查，正在处理')
     task.value = null
@@ -93,7 +95,13 @@ onBeforeUnmount(stopPolling)
     <el-card>
       <h2 class="sec-head">提交待审查内容</h2>
 
-      <el-tabs v-model="inputMode">
+      <FileDropzone
+        v-if="reviewType === 'contract'"
+        v-model="reviewFile"
+        accept=".pdf,.doc,.docx,.md,.txt"
+        hint="长文档会自动分块逐块审查；.doc 上传后自动转换为 .docx"
+      />
+      <el-tabs v-else v-model="inputMode">
         <el-tab-pane label="文本输入" name="text">
           <el-input
             v-model="content"

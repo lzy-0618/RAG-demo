@@ -159,14 +159,14 @@ curl -s -X POST http://127.0.0.1:8000/api/v1/auth/login \
 
 | 接口 | 说明 |
 | --- | --- |
-| `POST /api/v1/review` | 提交审查（multipart：`review_type` + `content` 或 `file`），立即返回 `task_id` |
+| `POST /api/v1/review` | 提交审查（multipart：合同用 `review_type=contract` + `file`；制度用 `review_type=regulation` + `content` 或 `file`），立即返回 `task_id` |
 | `GET /api/v1/review/{task_id}` | 查询进度与结果（前端轮询，`completed`/`failed` 后停止） |
 | `GET /api/v1/review/tasks` | 任务列表（历史记录） |
 | `DELETE /api/v1/review/{task_id}` | 删除任务与落地文件 |
 
 ### 合同审查
 
-`POST /api/v1/review` 接收合同文件或文本。文件上传到 Dify；文本先写入临时 TXT 再上传，旧式 DOC 先转换为 DOCX。`dify/dsl/合同审查.yml` 在 Dify 中提取正文、按段落切成约 2000 字的文本块，并在 Iteration 中对每块分别检索法规、制度与案例，生成结构化报告。后端只调用一次工作流，不再自行解析或切分合同。
+`POST /api/v1/review` 仅接收合同文件。文件上传到 Dify，旧式 DOC 先转换为 DOCX。`dify/dsl/合同审查.yml` 在 Dify 中提取正文、按段落切成约 2000 字的文本块，并在 Iteration 中对每块分别检索法规、制度与案例，生成结构化报告。后端只调用一次工作流，不再自行解析或切分合同。
 
 工作流返回等长的 `chunks` 和 `results`。后端用 `chunks[i]` 核对 `results[i]` 的风险原文，用同次法规/制度检索结果核对引用；无法核对的风险标记 `needs_review`，无结果或结构错误的块计入 `failed_chunks`。`services/review.py` 合并重复风险并生成摘要，前端轮询任务状态；合同的块数和结果在工作流完成后回填。应用 Key 为 `DIFY_CONTRACT_REVIEW_APP_KEY`。
 

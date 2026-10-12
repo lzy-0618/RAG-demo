@@ -3,7 +3,6 @@
 import asyncio
 import difflib
 import json
-import tempfile
 import uuid
 from pathlib import Path
 
@@ -387,16 +386,7 @@ async def run_review_task(task_id: int, source_text: str | None = None) -> None:
         _update(db, task, status=REVIEW_STATUS_RUNNING, error=None)
 
         if task.review_type == REVIEW_TYPE_CONTRACT:
-            if source_text is not None:
-                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".txt", delete=False) as temp:
-                    temp.write(source_text)
-                    file_path = temp.name
-                try:
-                    result = await _review_contract_file(file_path, task.created_by or "review")
-                finally:
-                    Path(file_path).unlink(missing_ok=True)
-            else:
-                result = await _review_contract_file(task.source_path or "", task.created_by or "review")
+            result = await _review_contract_file(task.source_path or "", task.created_by or "review")
             _update(
                 db, task, status=REVIEW_STATUS_COMPLETED,
                 total_chunks=result["total_chunks"],
@@ -498,8 +488,10 @@ async def create_task(
     """
     if review_type not in (REVIEW_TYPE_CONTRACT, REVIEW_TYPE_REGULATION):
         raise BizError(message=f"未知的审查类型：{review_type}")
+    if review_type == REVIEW_TYPE_CONTRACT and content is not None:
+        raise BizError(message="合同审查仅支持文件上传")
     if not content and not file_bytes:
-        raise BizError(message="请提供待审查的文本内容或文件")
+        raise BizError(message="请提供待审查文件" if review_type == REVIEW_TYPE_CONTRACT else "请提供待审查的文本内容或文件")
 
     task = ReviewTask(
         review_type=review_type,
