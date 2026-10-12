@@ -14,10 +14,21 @@ export interface ReferenceCase {
   lesson: string
 }
 
+export interface Citation {
+  document_name: string
+  section: string
+  url: string
+}
+
 export interface RiskItem {
   clause: string
   risk_level: 'high' | 'medium' | 'low' | string
   violations: Violation[]
+  analysis?: string
+  citations?: Citation[]
+  case_analysis?: string
+  needs_review?: boolean
+  validation_notes?: string[]
   reference_case: ReferenceCase | null
   suggestion: string
   chunk_index?: number | null
@@ -29,6 +40,7 @@ export interface ReviewResult {
   summary: string
   total_chunks: number
   failed_chunks: number
+  failed_details?: { chunk_index: number; location: string; error: string }[]
   risks: RiskItem[]
 }
 

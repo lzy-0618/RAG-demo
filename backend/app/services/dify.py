@@ -37,7 +37,7 @@ class DifyClient:
     async def run_workflow(
         self, api_key: str, inputs: dict, user: str, response_mode: str = "blocking"
     ) -> dict:
-        """同步（blocking）执行工作流，适用于合同审查等需要完整结果多步推理的场景。"""
+        """同步（blocking）执行短工作流。"""
         url = f"{self.base_url}/v1/workflows/run"
         body = {"inputs": inputs, "response_mode": response_mode, "user": user}
         try:
@@ -49,13 +49,18 @@ class DifyClient:
         return resp.json()
 
     async def run_workflow_stream(
-        self, api_key: str, inputs: dict, user: str
+        self, api_key: str, inputs: dict, user: str, *, long_running: bool = False
     ) -> AsyncGenerator[dict, None]:
         """流式执行工作流，逐条 yield Dify SSE 事件的 JSON。"""
         url = f"{self.base_url}/v1/workflows/run"
         body = {"inputs": inputs, "response_mode": "streaming", "user": user}
         try:
-            async with _client() as client:
+            timeout = (
+                httpx.Timeout(connect=settings.DIFY_TIMEOUT, read=1800,
+                              write=settings.DIFY_TIMEOUT, pool=settings.DIFY_TIMEOUT)
+                if long_running else settings.DIFY_TIMEOUT
+            )
+            async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
                 async with client.stream(
                     "POST", url, json=body, headers=self._headers(api_key)
                 ) as resp:

@@ -145,7 +145,7 @@ onBeforeUnmount(stopPolling)
         <h2 class="sec-head flush">审查结论</h2>
         <span class="verdict" :class="task.result.is_compliant ? 'is-clear' : 'is-risk'">
           <span class="verdict-dot" aria-hidden="true" />
-          {{ task.result.is_compliant ? '未发现风险' : `发现 ${task.result.risks.length} 处风险` }}
+          {{ task.result.is_compliant ? '未发现风险' : task.result.risks.length ? `发现 ${task.result.risks.length} 处风险` : '审查未完成' }}
         </span>
       </div>
 
@@ -154,6 +154,12 @@ onBeforeUnmount(stopPolling)
         :type="task.result.is_compliant ? 'success' : 'warning'"
         :closable="false"
       />
+
+      <ul v-if="task.result.failed_details?.length" class="note-list">
+        <li v-for="detail in task.result.failed_details" :key="detail.chunk_index" class="note-item">
+          第 {{ detail.chunk_index }} 块<template v-if="detail.location">（{{ detail.location }}）</template>：{{ detail.error }}
+        </li>
+      </ul>
 
       <!-- 风险条目按「批注卡」呈现，呈现细节见 RiskNote 组件 -->
       <RiskNote
@@ -164,6 +170,11 @@ onBeforeUnmount(stopPolling)
         :location="risk.location"
         :clause="risk.clause"
         :violations="risk.violations"
+        :analysis="risk.analysis"
+        :citations="risk.citations"
+        :case-analysis="risk.case_analysis"
+        :needs-review="risk.needs_review"
+        :validation-notes="risk.validation_notes"
         :reference-case="risk.reference_case"
         :suggestion="risk.suggestion"
       />

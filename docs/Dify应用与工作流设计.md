@@ -117,114 +117,15 @@
 
 ---
 
-## 3. 应用二：合同审查（Workflow，核心）
+## 3. 应用二：合同审查（Workflow）
 
-### 3.1 定位
+当前部署文件：`dify/dsl/合同审查.yml`。Start 接收 `input_file`（PDF、DOCX、MD 或 TXT）。Dify 文档提取器输出正文，Code 节点按段落切成约 2000 字的文本块，Iteration 对各块分别检索法规、现行制度和典型案例，再由 Qwen 一次生成结构化 `report.risks`。案例只用于辅助分析，风险依据取自法规和制度检索。
 
-对「合同」做单块合规审查（需求②）。后端先把长文档切块，**每块调一次本工作流**。应用内先做**合规判定**：合规的块直接结束，不合规的块再进入违规分析（两段式 LLM，省 token 且语义与业务一致）。
+该合同审查流程已在 Dify 实例验证。
 
-### 3.2 节点编排
+迭代内最后的 Code 节点将该块原文、报告及三路原始检索结果封装为 JSON 字符串。End 输出 `chunks: array[string]` 和等长的 `results: array[string]`。迭代单项失败时对应结果为空，供后端标记人工复核。
 
-```
-开始(Start，输入 chunk_text)
-  → 知识检索（法规 + 制度 + 典型案例，3 库，query = chunk_text）
-  → LLM-1「合规判定」（JSON：is_compliant + reason）
-  → 条件分支(IF is_compliant == true)
-      ├─ 合规   → End A（is_compliant=true, risks=[]）
-      └─ 不合规 → LLM-2「违规分析」（违反的法规/制度 + 依据典型案例的修改建议）
-                → Code 节点（JSON 兜底解析）
-                → End B
-```
-
-### 3.3 输入变量（Start 节点定义）
-
-| 变量 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `chunk_text` | paragraph | 是 | 待审查的合同文本块 |
-
-> `page`/`chunk_index` 不进工作流，由后端切块时记录、汇总时回填定位信息。
-
-### 3.4 知识检索节点
-
-- 数据集：**法律法规库 + 某钢规章制度库 + 典型案例库**（3 库；审核规则库、专家标注库不挂本应用）。
-- Top K：5（3 库合计）；Score Threshold：先不设。
-- 检索 query：直接用 `chunk_text`；若联调发现长文本召回不准，在**本工作流内**（检索节点前）加一个轻量 LLM「关键词抽取」节点，不把抽取逻辑写进后端。
-
-### 3.5 LLM-1「合规判定」
-
-- 模型：DeepSeek（`deepseek-chat`），temperature 0.1，开启 JSON mode。
-- 输出：`{"is_compliant": true/false, "reason": "判定依据，一两句话"}`。
-- Prompt 要点：
-
-```
-你是合同合规审查员。请依据参考资料判断以下合同文本块是否合规（是否违反法律法规或规章制度）。
-参考资料：{{#context#}}
-待审查文本：{{#start.chunk_text#}}
-判定标准：文本与法律法规/规章制度存在明确冲突时才算不合规；参考资料中找不到依据的疑虑不算。
-只输出 JSON：{"is_compliant": ..., "reason": "..."}
-```
-
-### 3.6 LLM-2「违规分析」（不合规分支）
-
-**输出 schema（JSON）**，开启 JSON mode，由后接 Code 节点兜底解析：
-
-```json
-{
-  "risks": [
-    {
-      "clause": "被判定有风险的条款原文",
-      "risk_level": "high | medium | low",
-      "violations": [
-        {
-          "law_name": "《法律/制度名称》",
-          "article": "具体条款（如第五百零六条）",
-          "description": "具体违反内容"
-        }
-      ],
-      "reference_case": {
-        "case_name": "典型案例名",
-        "lesson": "案情教训/裁判要旨"
-      },
-      "suggestion": "参考典型案例给出的合理化修改建议"
-    }
-  ]
-}
-```
-
-**Prompt 要点**：
-
-```
-你是企业合规审查专家。请审查以下文本，识别违反法律法规或规章制度的风险条款。
-参考资料（法条/制度/典型案例检索结果）：{{#context#}}
-待审查文本：{{#start.chunk_text#}}
-
-要求：
-1. 逐条识别违规条款，输出条款原文 clause 与风险等级 risk_level。
-2. violations 的 law_name/article 必须来自参考资料原文，不得编造；description 说明具体违反内容。
-3. reference_case 只能引用检索到的典型案例；无可引用案例时置为 null，suggestion 改为通用合规建议。
-4. 每条风险给出 suggestion（参考典型案例的合理化修改建议）。
-5. 本块无风险时 risks 返回 []。
-严格只输出 JSON。
-```
-
-### 3.7 Code 节点（兜底解析）
-
-容错解析 LLM-2 输出（剥离 ```json 包裹与首尾杂质），失败时返回 `{"risks": [], "parse_error": true}`，保证后端永远拿到合法 JSON。
-
-### 3.8 输出（两个 End 同构）
-
-| 字段 | End A（合规） | End B（不合规） |
-| --- | --- | --- |
-| `is_compliant` | true | false |
-| `compliance_reason` | LLM-1 的 reason | 违规点简要总结 |
-| `risks` | `[]` | Code 节点解析后的风险数组 |
-| `parse_error` | `false` | `true` 表示风险 JSON 解析失败 |
-
-> **`parse_error` 的用途（重要）**：违规分析的 JSON 输出可能因超出 `max_tokens` 被截断而解析失败，
-> 此时 `risks` 为空。若后端只看 `risks`，会把「解析失败」误当成「无风险」——合规产品里的危险假阴性。
-> 因此 End 透出 `parse_error`，后端据此把该块计为失败块并提示人工复核（见 `backend/README.md` 的审查安全网）。
-
-> 相比早期「条款审查」方案的变化：按 `review_type` 复用一个工作流改为**合同/制度各建独立应用**；violations 去掉 `link` 字段（防模型编造 URL）；cases 数组简化为单条 `reference_case`。
+后端上传原始文件、调用一次流式工作流，按 Dify 返回的 `chunks[i]` 校验 `results[i]`：风险原文须属于当前块，法规/制度引用须能在本次检索结果中核对；然后去重、汇总并保存。文本输入先写临时 TXT。旧式 DOC 先转换为 DOCX。后端不再为合同另行解析和切块。
 
 ---
 
@@ -232,12 +133,12 @@
 
 ### 4.1 定位
 
-对「新规章制度」做单块审查（需求③），**独立应用**，不复用合同审查的 API Key。骨架与合同审查一致（检索 → 合规判定 → 分支 → 冲突标注），核心职责是**冲突检测**。DSL 见 `dify/dsl/制度审查.yml`。差异点：
+对「新规章制度」做单块审查（需求③），**独立应用**，不复用合同审查的 API Key。沿用自身的检索 → 合规判定 → 分支 → 冲突标注流程，核心职责是**冲突检测**。DSL 见 `dify/dsl/制度审查.yml`。差异点：
 
 - 知识检索只挂 **2 库**：法律法规 + 某钢规章制度（无典型案例、审核规则、专家标注）。Top K：5。
 - LLM-1 判定语义为冲突检测：与上位法/现行制度存在明确冲突、越权或矛盾才算不合规；纯文字表述、格式问题不算不合规。
 - LLM-2 冲突标注：`violations`（law_name/article/description）与合同审查同名同构，**无 `reference_case` 字段**（防编造），`suggestion` 依据被冲突的上位条款给出。
-- 输入变量同为 `chunk_text`，End 输出同构（`is_compliant` / `compliance_reason` / `risks`），后端审查管线按 `review_type` 换 API Key 即可。
+- 输入变量为 `chunk_text`，End 输出 `is_compliant` / `compliance_reason` / `risks` / `parse_error`（`is_compliant` / `compliance_reason` / `risks`），后端审查管线按 `review_type` 换 API Key 即可。
 
 > 已知取舍：专家标注库不进审查应用，需求⑤专家纠错的「下次回答参考」只在合规咨询链路生效。
 
@@ -365,15 +266,15 @@ while True:
 ### 8.1 建议构建顺序
 
 1. **先建 5 个知识库**（含空的专家知识库），记下 dataset_id。
-2. 建 **合同审查 Workflow**（核心：手动传一段合规文本与一段含明显违规的合同文本，验证两分支）。
-3. 参考合同审查骨架建 **制度审查 Workflow**。
+2. 导入 **合同审查 Workflow**，上传含多段条款的文件，检查提取、切块、逐块报告和后端校验。
+3. 导入独立的 **制度审查 Workflow**。
 4. 建 **合规咨询 Chatflow**（挂 2 库，测多轮问答与引用）。
 5. 建 **规章制度生成 Workflow**（测 outline / document 两段；再联调「生成 → 自动审查 → 修正重生成」循环）。
 6. 审查合并不建 Dify 应用，由后端按第 5 节规则实现。
 
 ### 8.2 每个应用发布后验证
 
-- 合同审查：分别传一段合规文本与一段含明显违规的合同文本，确认合规时 `is_compliant=true` 且 `risks=[]`；不合规时 `risks` 含 `law_name/article/reference_case/suggestion`。
+- 合同审查：上传合规和含风险的多段文件，确认 `chunks` / `results` 等长、逐块引用可核对，后端标记无法核对的风险。
 - 制度审查：同上；`reference_case` 恒为 null。
 - 合规咨询：连续多轮提问，确认回答带引用来源，且能按 `category` 切换语境。
 - 规章制度生成：先 `mode=outline` 得大纲，再 `mode=document` + 大纲得全文 JSON；修正模式用 `previous_sections` + `review_conflicts` 验证只改动被指出的部分。
@@ -384,7 +285,7 @@ while True:
 ## 9. 与后端衔接要点（预告）
 
 - 后端 `services/dify.py` 已封装 `chat` / `chat_stream` / `run_workflow` / `run_workflow_stream` / `upload_document` / `create_document_by_text`，与上述 4 个应用的接口一一对应。
-- 合同审查 / 制度审查：后端做「解析 → 切块 → 逐块调 `run_workflow` → 按第 5 节规则代码合并」，`inputs` 传 `chunk_text`；按 `review_type` 选择 `DIFY_CONTRACT_REVIEW_APP_KEY` / `DIFY_REGULATION_REVIEW_APP_KEY` 对应的应用。
+- 合同审查：后端上传文件后通过 `run_workflow_stream` 传 `input_file`；Dify 提取、切块和逐块审查，后端校验并合并。制度审查：后端解析切块后逐块调用 `run_workflow`，输入为 `chunk_text`。
 - 合规咨询：后端 `chat_stream` 传 `query/category`，SSE 转发到前端。
 - 规章制度生成：后端 `run_workflow` 传 `requirement/mode/outline`（修正轮次另传 `previous_sections/review_conflicts/revision_round`）；生成后后端切块调「制度审查」应用，不合规则自动修正重生成，最多 3 轮。
 - 后端接口细节见 `功能实现策略.md` 各模块章节，后续进入「后端程序接口对应」阶段再展开。

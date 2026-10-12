@@ -14,6 +14,12 @@ interface ReferenceCase {
   lesson: string
 }
 
+interface Citation {
+  document_name: string
+  section: string
+  url: string
+}
+
 withDefaults(
   defineProps<{
     index: number
@@ -21,10 +27,15 @@ withDefaults(
     clause: string
     location?: string | null
     violations?: Violation[]
+    analysis?: string | null
+    citations?: Citation[]
+    caseAnalysis?: string | null
+    needsReview?: boolean
+    validationNotes?: string[]
     referenceCase?: ReferenceCase | null
     suggestion?: string | null
   }>(),
-  { location: null, violations: () => [], referenceCase: null, suggestion: null },
+  { location: null, violations: () => [], analysis: null, citations: () => [], caseAnalysis: null, needsReview: false, validationNotes: () => [], referenceCase: null, suggestion: null },
 )
 
 const LEVEL_LABEL: Record<string, string> = {
@@ -51,6 +62,27 @@ function levelLabel(level: string) {
 
     <blockquote class="note-clause">{{ clause }}</blockquote>
 
+    <div v-if="needsReview" class="note-block">
+      <p class="note-block-title u-caption">待人工复核</p>
+      <ul class="note-list">
+        <li v-for="(note, ni) in validationNotes" :key="ni" class="note-item">{{ note }}</li>
+      </ul>
+    </div>
+
+    <p v-if="analysis" class="note-suggest">分析：{{ analysis }}</p>
+
+    <div v-if="citations.length" class="note-block">
+      <p class="note-block-title u-caption">依据引用</p>
+      <ul class="note-list">
+        <li v-for="(citation, ci) in citations" :key="ci" class="note-item">
+          <a v-if="citation.url" :href="citation.url" target="_blank" rel="noopener noreferrer">
+            {{ citation.document_name }} · {{ citation.section }}
+          </a>
+          <span v-else>{{ citation.document_name }} · {{ citation.section }}（知识库未提供链接）</span>
+        </li>
+      </ul>
+    </div>
+
     <div v-if="violations.length" class="note-block">
       <p class="note-block-title u-caption">违反依据</p>
       <ul class="note-list">
@@ -70,6 +102,8 @@ function levelLabel(level: string) {
         <span class="note-desc">{{ referenceCase.lesson }}</span>
       </div>
     </div>
+
+    <p v-if="caseAnalysis" class="note-suggest">案例分析：{{ caseAnalysis }}</p>
 
     <p v-if="suggestion" class="note-suggest">建议：{{ suggestion }}</p>
   </article>

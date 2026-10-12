@@ -6,7 +6,7 @@
 
 | 应用 | 类型 | DSL 文件 | 状态 |
 | --- | --- | --- | --- |
-| 合同审查（需求②） | Workflow | `dsl/合同审查.yml` | ✅ 已定稿 · 已联调 |
+| 合同审查（需求②） | Workflow | `dsl/合同审查.yml` | ✅ 已导入联调；Dify 提取、切块、迭代审查 |
 | 制度审查（需求③） | Workflow | `dsl/制度审查.yml` | ✅ 已定稿 · 已联调 |
 | 合规咨询（需求④） | Chatflow | `dsl/合规咨询.yml` | ✅ 已定稿 · 已联调 |
 | 规章制度生成（需求⑧） | Workflow | `dsl/规章制度生成.yml` | ✅ 已定稿 · 已联调 |
@@ -15,7 +15,7 @@
 
 ### 联调状态（2026-09-13 验证）
 
-四个应用均已导入 Dify 1.17.0 并联调通过，可用冒烟脚本随时复测：
+合同审查的新工作流已在 Dify 验证。下表保留其他应用此前的联调记录；可用冒烟脚本复测：
 
 ```bash
 cd backend && .venv/bin/python ../dify/scripts/smoke_test.py
@@ -23,7 +23,6 @@ cd backend && .venv/bin/python ../dify/scripts/smoke_test.py
 
 | 应用 | 实测结果 |
 | --- | --- |
-| 合同审查 | 4.8s，`is_compliant=false`，2 条风险，依据《民法典》第五百零六条等 |
 | 制度审查 | 6.1s，`is_compliant=false`，2 条冲突（含与现行制度条款的冲突） |
 | 合规咨询 | 3.2s，回答 388 字，引用来源 3 条 |
 | 规章制度生成 | 5.6s，大纲 1628 字，`sections_json` 正确为空（outline 模式） |
@@ -45,7 +44,6 @@ cd backend && .venv/bin/python ../dify/scripts/smoke_test.py
 | Code 节点 | 字段名为 `code_language: python3`；`outputs: {变量: {children: null, type: string}}` | 多写非标准 `language` 字段 |
 | LLM 节点 | 需含 `context` / `vision` / `memory` / `structured_output` / `retry_config` | 只写 `model` + `prompt_template` |
 | if-else 条件 | `comparison_operator: is`（字符串相等）、`varType: string`；分支边 `sourceHandle` 取 `'true'` / `'false'` | — |
-| 变量聚合器取值顺序 | 聚合器取列表中**第一个「非空值」**，而 `[]` 空数组也算非空。因此**分支专属的来源必须排在「分支前必然执行」的节点之前** | 合同审查曾把 `code_judge.risks`（分支前执行、恒为 `[]`）排在前，导致不合规分支识别出的真实风险被空数组覆盖，返回 `risks=[]` |
 
 **校验（改完 DSL 必跑）**：
 
@@ -69,109 +67,20 @@ bash dify/scripts/validate.sh          # 默认容器 docker-api-1
 
 ---
 
-## 模型与参数约定（DeepSeek 插件 0.0.24）
-
-> 本节记录一次真实踩坑。首次联调时合同审查返回「判定结果解析失败」、`risks` 为空，排查结论如下。
-
-### 1. 模型名必须用插件声明的名字
-
-插件 0.0.24 声明的模型只有：`deepseek-flash`、`deepseek-v4-flash`、`deepseek-v4-flash-vision-exp`、`deepseek-v4-pro`。
-
-**`deepseek-chat` 不在清单中**，而插件对未声明的模型名不做任何参数归一化、直接透传上游——结果：
-
-- `thinking` 参数被静默忽略，**思考模式默认开启**（judge 单次 4440 completion tokens、28 秒）；
-- 思维链被输出到 `llm.text` 里（`<think>…</think>` + `<!--dify-deepseek-reasoning-->` 标记），把 JSON 答案淹没了。
-
-### 2. 节点参数约定（已写入 4 个 DSL）
-
-| 参数 | 取值 | 说明 |
-| --- | --- | --- |
-| `name` | `deepseek-v4-flash` | 插件声明的模型；质量不够时可换 `deepseek-v4-pro`（UI 下拉选择） |
-| `thinking` | `false` | 关思考模式。**必须关**：开启时延迟/成本高一个数量级，且思维链会污染输出 |
-| `response_format` | `json_object` | 仅对输出 JSON 的节点（判定 / 违规分析 / 冲突标注 / 全文生成）设置 |
-| `temperature` | 判定 0.1、分析 0.2、改写 0.1、问答 0.3 | 关闭思考模式后该参数才生效（插件在思考模式下会丢弃 temperature） |
-| `max_tokens` | 判定 1024 / 分析 **8192** / 全文 8192 / 改写 256 / 问答 2048 | 防跑飞；全文生成给足额度 |
-
-### 3.1 违规分析输出被截断（已修，需重新导入两个审查应用）
-
-联调中发现的严重问题：**块较大（约 2800 字以上）时，违规分析节点的 JSON 输出会超出 `max_tokens=4096`
-被截断（`finish_reason=length`），解析兜底返回空风险列表，整块被静默判为「无风险」**——
-合规场景下的危险假阴性（判定环节其实已正确识别出违反《民法典》第五百零六条）。
-
-修复三件套：
-
-1. 违规分析 / 冲突标注节点的 `max_tokens` 提到 **8192**；
-2. prompt 增加篇幅约束（description ≤60 字、violations ≤3 条、最多 10 条风险、必须输出完整合法 JSON）；
-3. **End 输出透出 `parse_error`**（新增「合并解析标志」聚合器），后端据此把解析失败的块计为失败块并提示人工复核。
-
-> 因此 `dsl/合同审查.yml`、`dsl/制度审查.yml` 已更新为 **11 节点 / 15 边**，
-> 需重新导入这 2 个应用（其余 2 个应用未改动，无需重导）。
-> 后端的安全网（判定不合规但无风险明细也算失败块）已生效，即使暂不重导也不会再出现静默假阴性。
-
-### 3. Code 节点必须能容忍思考链
-
-即使关闭了思考模式，解析器仍按「容忍思考链」实现（防御性）：先剥离 `<think>…</think>`，再**从后往前**逐个候选花括号对象尝试解析，取**最后一个含目标键的合法 JSON**（即最终答案，而非思维链里的示例）。这样才能避免「首个 `{` 到最后一个 `}`」把思考内容圈进来的经典错误。
-
-### 4. 检索已开启 Rerank
-
-三方模型里已配置 SiliconFlow 的 `BAAI/bge-reranker-v2-m3`，合同审查 / 制度审查 / 规章制度生成的检索节点已开启 `reranking_enable: true`（首次联调时检索命中质量差，Top 1 得分为 0.03，命中内容与待审条款无关）。
-
----
-
-
-
 ## 合同审查 Workflow
 
-### 编排
+部署 `dsl/合同审查.yml`。工作流顺序：`Start(input_file)` → 文档提取器 → Code 按段落切块（约 2000 字）→ Iteration 对每块分别检索法规、制度和典型案例 → Qwen 一次生成结构化报告 → Code 封装该块原文、报告及三路检索原始结果 → End 返回 `chunks` 和 `results` 两个等长数组。
 
-```
-Start(chunk_text)
-  → 知识检索（法规 + 制度 + 典型案例，3 库，Top K 5）
-  → LLM-1 合规判定（DeepSeek，temperature 0.1）
-  → Code 解析判定结果（JSON 兜底，失败按不合规处理）
-  → IF is_compliant == "true"
-      ├─ 合规   → 聚合器（reason / risks=[]）→ End
-      └─ 不合规 → LLM-2 违规分析（temperature 0.2）
-                → Code 兜底解析 → 聚合器 → End
-```
+后端仅上传文件、接收工作流结果、校验风险原文与本次法规/制度检索证据、合并风险并保存任务。文本输入写入临时 `.txt` 后同样交给 Dify；旧式 `.doc` 在上传前转换为 `.docx`。制度审查仍使用原有后端解析与切块。
 
-> Dify 校验器要求恰好一个 End 节点，因此两分支经两个变量聚合器（`compliance_reason` / `risks`）汇到同一 End，输出结构与设计文档 3.8 节一致。
+部署步骤：
 
-### 变量表
+1. 在 Dify 导入并发布 `dsl/合同审查.yml`，检查文档提取器、切块 Code 和 Iteration 的连接。
+2. 确认三路检索节点依次绑定法规库、制度库、典型案例库，并配置 Qwen 模型及 rerank 模型。
+3. 将该应用的 API Secret 写入后端 `DIFY_CONTRACT_REVIEW_APP_KEY`。
+4. 上传一份多段合同，核对 End 的 `chunks` 与 `results` 数量相同，逐块风险原文能在对应 `chunks[i]` 中找到；再通过后端查看校验与汇总结果。
 
-| 变量 | 类型 | 来源 | 消费节点 |
-| --- | --- | --- | --- |
-| `chunk_text` | paragraph | Start 输入（后端切块传入） | 知识检索（query）、LLM-1、LLM-2 |
-| `result` | array[object] | 知识检索输出 | LLM-1 / LLM-2 的 context（`{{#context#}}`） |
-| `text` | string | LLM-1 / LLM-2 输出 | Code 解析节点 |
-| `is_compliant` | string（"true"/"false"） | code_judge 输出 | 条件分支、End 输出 |
-| `reason` | string | code_judge 输出 | agg_reason（合规分支）、End |
-| `risks` | array[object] | code_judge（恒 `[]`）/ code_parse 输出 | agg_risks、End |
-| `summary` / `parse_error` | string | code_parse 输出 | agg_reason / 调试 |
-
-**End 输出**（后端 `run_workflow` 的 `outputs`）：
-
-```json
-{
-  "is_compliant": "true 或 false（字符串，后端自行转布尔）",
-  "compliance_reason": "合规：判定依据 / 不合规：风险条数摘要",
-  "risks": [ { "clause": "...", "risk_level": "...", "violations": [...], "reference_case": {...} 或 null, "suggestion": "..." } ]
-}
-```
-
-### 部署步骤
-
-1. Dify 控制台 → 创建应用 → **导入 DSL 文件** → 选择 `dsl/合同审查.yml`。
-2. 打开「知识检索」节点，绑定 3 个知识库：**法律法规库、某钢规章制度库、典型案例库**（DSL 中 `dataset_ids` 留空，导入后必须手动选择）。
-3. 确认 DeepSeek 供应商已配置 API Key（两个 LLM 节点均为 `deepseek-chat`）；如插件支持，可在 LLM 节点手动开启 JSON mode 进一步约束输出。
-4. 「知识检索」如已部署 rerank 模型，可开启重排序提升法条命中率。
-5. 发布应用 → 「API 访问」生成 API Secret → 填入后端 `backend/.env` 的 `DIFY_CONTRACT_REVIEW_APP_KEY`（后端变量拆分完成后生效）。
-
-### 验证用例
-
-- **合规文本**：输入一段普通商务条款（如仅约定标的与价款）→ 期望 `is_compliant="true"`、`risks=[]`。
-- **违规文本**：输入含「造成对方人身伤害的免责条款」等文本 → 期望 `is_compliant="false"`，`risks` 中 `violations` 指向《民法典》第五百零六条等真实依据，`suggestion` 结合典型案例。
-- **解析兜底**：临时把 LLM-2 prompt 改成输出非 JSON → 期望 `parse_error=true`、`risks=[]`，流程不报错。
+已在 Dify 实例验证文档提取、切块和逐块审查。部署到新实例时仍需检查知识库、模型与应用 API Secret 的绑定。
 
 ---
 
@@ -179,7 +88,7 @@ Start(chunk_text)
 
 ### 编排
 
-与合同审查完全同构（两段式判定 + 分支 + 聚合器 + 单 End），差异点：
+制度审查沿用原有两段式判定、分支、聚合器和单 End，关键配置：
 
 - 知识检索只挂 **2 库**：法律法规库、某钢规章制度库（无案例/审核规则/专家标注），Top K 5。
 - LLM-1 判定语义为**冲突检测**：是否与上位法/现行制度冲突、越权或矛盾；文字表述/格式问题不算不合规。
@@ -188,7 +97,7 @@ Start(chunk_text)
 
 ### 变量表
 
-与合同审查一致（见上），仅 LLM-2 的 prompt 与检索库范围不同。
+Start 接收后端传入的 `chunk_text`；End 返回 `is_compliant`、`compliance_reason`、`risks` 和 `parse_error`。
 
 **End 输出**：
 

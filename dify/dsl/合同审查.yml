@@ -1,57 +1,60 @@
-# =====================================================================
-# 应用一：合同审查 Workflow（需求②）
-# 设计依据：docs/Dify应用与工作流设计.md 第 3 节
-# 格式依据：Dify 1.17.0 真实导出格式（节点顶层 type: custom，语义类型在 data.type）
-#
-# 编排：Start(chunk_text)
-#   → 知识检索（法律法规 + 规章制度 + 典型案例，3 库）
-#   → LLM-1 合规判定 → Code 解析
-#   → IF 合规 → 直接汇入 End（risks=[]）
-#     IF 不合规 → LLM-2 违规分析 → Code 兜底解析 → 汇入 End
-#
-# 导入后必做：
-#   1. 「知识检索」节点 dataset_ids 为空，需在 UI 选择 3 个知识库：
-#      法律法规库 / 某钢规章制度库 / 典型案例库
-#   2. LLM 节点模型为 langgenius/deepseek/deepseek → deepseek-chat
-# =====================================================================
 app:
-  description: 对合同文本块做合规审查：先判定是否合规，不合规时列明违反的法规/制度条款并参考典型案例给出修改建议。输入为后端切好的单块合同文本 chunk_text。
-  icon: ⚖️
-  icon_background: '#FFF6E5'
+  description: 上传合同后在 Dify 中提取、切块、逐块分类检索和审查；后端汇总并校验。
+  icon: 🤖
+  icon_background: '#FFEAD5'
+  icon_type: emoji
   mode: workflow
   name: 合同审查
   use_icon_as_answer_icon: false
-
-dependencies: []
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/tongyi:0.2.22@9cea96ffc7977f536c02999c80ff1283b1819aab9b6fa2fdf789d0c6c7d03715
+    version: null
 kind: app
-version: 0.3.1
-
+version: 0.7.0
 workflow:
   conversation_variables: []
   environment_variables: []
   features:
     file_upload:
-      allowed_file_extensions: []
-      allowed_file_types: []
-      allowed_file_upload_methods: []
+      allowed_file_extensions:
+      - .JPG
+      - .JPEG
+      - .PNG
+      - .GIF
+      - .WEBP
+      - .SVG
+      allowed_file_types:
+      - image
+      allowed_file_upload_methods:
+      - local_file
+      - remote_url
       enabled: false
       fileUploadConfig:
+        attachment_image_file_size_limit: 2
         audio_file_size_limit: 50
         batch_count_limit: 5
         file_size_limit: 15
+        file_upload_limit: 50
+        image_file_batch_limit: 10
         image_file_size_limit: 10
+        knowledge_file_size_limit: 15
+        single_chunk_attachment_limit: 10
+        skill_file_size_limit: 50
         video_file_size_limit: 100
         workflow_file_upload_limit: 10
       image:
         enabled: false
         number_limits: 3
         transfer_methods:
-          - local_file
-          - remote_url
+        - local_file
+        - remote_url
       number_limits: 3
     opening_statement: ''
     retriever_resource:
-      enabled: false
+      enabled: true
     sensitive_word_avoidance:
       enabled: false
     speech_to_text:
@@ -65,714 +68,703 @@ workflow:
       voice: ''
   graph:
     edges:
-      - data:
-          isInIteration: false
-          isInLoop: false
-          sourceType: start
-          targetType: knowledge-retrieval
-        id: edge-start-retriever
-        source: start
-        sourceHandle: source
-        target: retriever
-        targetHandle: target
-        type: custom
-        zIndex: 0
-      - data:
-          isInIteration: false
-          isInLoop: false
-          sourceType: knowledge-retrieval
-          targetType: llm
-        id: edge-retriever-judge
-        source: retriever
-        sourceHandle: source
-        target: llm_judge
-        targetHandle: target
-        type: custom
-        zIndex: 0
-      - data:
-          isInIteration: false
-          isInLoop: false
-          sourceType: llm
-          targetType: code
-        id: edge-judge-parse
-        source: llm_judge
-        sourceHandle: source
-        target: code_judge
-        targetHandle: target
-        type: custom
-        zIndex: 0
-      - data:
-          isInIteration: false
-          isInLoop: false
-          sourceType: code
-          targetType: if-else
-        id: edge-judge-branch
-        source: code_judge
-        sourceHandle: source
-        target: if_compliant
-        targetHandle: target
-        type: custom
-        zIndex: 0
-      - data:
-          isInIteration: false
-          isInLoop: false
-          sourceType: if-else
-          targetType: variable-aggregator
-        id: edge-true-reason
-        source: if_compliant
-        sourceHandle: 'true'
-        target: agg_reason
-        targetHandle: target
-        type: custom
-        zIndex: 0
-      - data:
-          isInIteration: false
-          isInLoop: false
-          sourceType: if-else
-          targetType: variable-aggregator
-        id: edge-true-risks
-        source: if_compliant
-        sourceHandle: 'true'
-        target: agg_risks
-        targetHandle: target
-        type: custom
-        zIndex: 0
-      - data:
-          isInIteration: false
-          isInLoop: false
-          sourceType: if-else
-          targetType: llm
-        id: edge-false-analyze
-        source: if_compliant
-        sourceHandle: 'false'
-        target: llm_analyze
-        targetHandle: target
-        type: custom
-        zIndex: 0
-      - data:
-          isInIteration: false
-          isInLoop: false
-          sourceType: llm
-          targetType: code
-        id: edge-analyze-parse
-        source: llm_analyze
-        sourceHandle: source
-        target: code_parse
-        targetHandle: target
-        type: custom
-        zIndex: 0
-      - data:
-          isInIteration: false
-          isInLoop: false
-          sourceType: code
-          targetType: variable-aggregator
-        id: edge-false-reason
-        source: code_parse
-        sourceHandle: source
-        target: agg_reason
-        targetHandle: target
-        type: custom
-        zIndex: 0
-      - data:
-          isInIteration: false
-          isInLoop: false
-          sourceType: code
-          targetType: variable-aggregator
-        id: edge-false-risks
-        source: code_parse
-        sourceHandle: source
-        target: agg_risks
-        targetHandle: target
-        type: custom
-        zIndex: 0
-      - data:
-          isInIteration: false
-          isInLoop: false
-          sourceType: variable-aggregator
-          targetType: end
-        id: edge-reason-end
-        source: agg_reason
-        sourceHandle: source
-        target: end
-        targetHandle: target
-        type: custom
-        zIndex: 0
-      - data:
-          isInIteration: false
-          isInLoop: false
-          sourceType: variable-aggregator
-          targetType: end
-        id: edge-risks-end
-        source: agg_risks
-        sourceHandle: source
-        target: end
-        targetHandle: target
-        type: custom
-        zIndex: 0
-      - data:
-          isInIteration: false
-          isInLoop: false
-          sourceType: if-else
-          targetType: variable-aggregator
-        id: edge-true-parse
-        source: if_compliant
-        sourceHandle: 'true'
-        target: agg_parse_error
-        targetHandle: target
-        type: custom
-        zIndex: 0
-      - data:
-          isInIteration: false
-          isInLoop: false
-          sourceType: code
-          targetType: variable-aggregator
-        id: edge-false-parse
-        source: code_parse
-        sourceHandle: source
-        target: agg_parse_error
-        targetHandle: target
-        type: custom
-        zIndex: 0
-      - data:
-          isInIteration: false
-          isInLoop: false
-          sourceType: variable-aggregator
-          targetType: end
-        id: edge-parse-end
-        source: agg_parse_error
-        sourceHandle: source
-        target: end
-        targetHandle: target
-        type: custom
-        zIndex: 0
+    - id: edge-1789090337990-extract_doc
+      source: '1789090337990'
+      target: extract_doc
+      sourceHandle: source
+      targetHandle: target
+      type: custom
+      zIndex: 0
+      data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: document-extractor
+    - id: edge-extract_doc-split_contract
+      source: extract_doc
+      target: split_contract
+      sourceHandle: source
+      targetHandle: target
+      type: custom
+      zIndex: 0
+      data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: document-extractor
+        targetType: code
+    - id: edge-split_contract-iter_review
+      source: split_contract
+      target: iter_review
+      sourceHandle: source
+      targetHandle: target
+      type: custom
+      zIndex: 0
+      data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: iteration
+    - id: edge-iter_review-1789095413360
+      source: iter_review
+      target: '1789095413360'
+      sourceHandle: source
+      targetHandle: target
+      type: custom
+      zIndex: 0
+      data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: iteration
+        targetType: end
+    - id: edge-iter_review_start-1789090408803
+      source: iter_review_start
+      target: '1789090408803'
+      sourceHandle: source
+      targetHandle: target
+      type: custom
+      zIndex: 0
+      data:
+        isInIteration: true
+        isInLoop: false
+        sourceType: iteration-start
+        targetType: knowledge-retrieval
+    - id: edge-1789090408803-1789091303965
+      source: '1789090408803'
+      target: '1789091303965'
+      sourceHandle: source
+      targetHandle: target
+      type: custom
+      zIndex: 0
+      data:
+        isInIteration: true
+        isInLoop: false
+        sourceType: knowledge-retrieval
+        targetType: template-transform
+    - id: edge-1789091303965-1789091095600
+      source: '1789091303965'
+      target: '1789091095600'
+      sourceHandle: source
+      targetHandle: target
+      type: custom
+      zIndex: 0
+      data:
+        isInIteration: true
+        isInLoop: false
+        sourceType: template-transform
+        targetType: llm
+    - id: edge-iter_review_start-1789091013980
+      source: iter_review_start
+      target: '1789091013980'
+      sourceHandle: source
+      targetHandle: target
+      type: custom
+      zIndex: 0
+      data:
+        isInIteration: true
+        isInLoop: false
+        sourceType: iteration-start
+        targetType: knowledge-retrieval
+    - id: edge-1789091013980-1789091359537
+      source: '1789091013980'
+      target: '1789091359537'
+      sourceHandle: source
+      targetHandle: target
+      type: custom
+      zIndex: 0
+      data:
+        isInIteration: true
+        isInLoop: false
+        sourceType: knowledge-retrieval
+        targetType: template-transform
+    - id: edge-1789091359537-1789091095600
+      source: '1789091359537'
+      target: '1789091095600'
+      sourceHandle: source
+      targetHandle: target
+      type: custom
+      zIndex: 0
+      data:
+        isInIteration: true
+        isInLoop: false
+        sourceType: template-transform
+        targetType: llm
+    - id: edge-iter_review_start-1789091060151
+      source: iter_review_start
+      target: '1789091060151'
+      sourceHandle: source
+      targetHandle: target
+      type: custom
+      zIndex: 0
+      data:
+        isInIteration: true
+        isInLoop: false
+        sourceType: iteration-start
+        targetType: knowledge-retrieval
+    - id: edge-1789091060151-1789091375404
+      source: '1789091060151'
+      target: '1789091375404'
+      sourceHandle: source
+      targetHandle: target
+      type: custom
+      zIndex: 0
+      data:
+        isInIteration: true
+        isInLoop: false
+        sourceType: knowledge-retrieval
+        targetType: template-transform
+    - id: edge-1789091375404-1789091095600
+      source: '1789091375404'
+      target: '1789091095600'
+      sourceHandle: source
+      targetHandle: target
+      type: custom
+      zIndex: 0
+      data:
+        isInIteration: true
+        isInLoop: false
+        sourceType: template-transform
+        targetType: llm
+    - id: edge-1789091095600-pack_review
+      source: '1789091095600'
+      target: pack_review
+      sourceHandle: source
+      targetHandle: target
+      type: custom
+      zIndex: 0
+      data:
+        isInIteration: true
+        isInLoop: false
+        sourceType: llm
+        targetType: code
     nodes:
-      - data:
-          desc: ''
-          selected: false
-          title: 开始
-          type: start
-          variables:
-            - label: 待审查文本块
-              max_length: null
-              options: []
-              required: true
-              type: paragraph
-              variable: chunk_text
-        height: 90
-        id: start
-        position: {x: 80, y: 300}
-        positionAbsolute: {x: 80, y: 300}
+    - data:
         selected: false
-        sourcePosition: right
-        targetPosition: left
-        type: custom
-        width: 244
-      - data:
-          dataset_ids: []
-          desc: ''
-          metadata_filtering_mode: disabled
-          multiple_retrieval_config:
-            reranking_enable: true
-            reranking_mode: reranking_model
-            reranking_model:
-              model: BAAI/bge-reranker-v2-m3
-              provider: langgenius/siliconflow/siliconflow
-            score_threshold: null
-            top_k: 5
-            weights: null
-          query_variable_selector:
-            - start
-            - chunk_text
-          retrieval_mode: multiple
-          selected: false
-          title: 知识检索（法规/制度/案例）
-          type: knowledge-retrieval
-          vision:
-            configs:
-              variable_selector: []
+        title: 用户输入
+        type: start
+        variables:
+        - variable: input_file
+          label: 待审查合同
+          type: file
+          required: true
+          allowed_file_types:
+          - document
+          allowed_file_extensions:
+          - .pdf
+          - .docx
+          - .md
+          - .txt
+          allowed_file_upload_methods:
+          - local_file
+          - remote_url
+          options: []
+        desc: ''
+      height: 135
+      id: '1789090337990'
+      position:
+        x: 264.1028243337528
+        y: 249.51126629404365
+      positionAbsolute:
+        x: 264.1028243337528
+        y: 249.51126629404365
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - data:
+        dataset_ids:
+        - rKXW07Zcg10fZmNmdUftkSmPzLDtTbv15jJDBVkK1wd7MA4X2s83Ep0t9tI552eb
+        multiple_retrieval_config:
+          reranking_enable: true
+          reranking_mode: reranking_model
+          reranking_model:
+            model: qwen3-rerank
+            provider: langgenius/tongyi/tongyi
+          top_k: 4
+        query_attachment_selector: []
+        query_variable_selector:
+        - iter_review
+        - item
+        retrieval_mode: multiple
+        selected: false
+        title: 知识检索
+        type: knowledge-retrieval
+        desc: ''
+        isInIteration: true
+        iteration_id: iter_review
+      height: 90
+      id: '1789090408803'
+      position:
+        x: 1350
+        y: 390
+      positionAbsolute:
+        x: 1350
+        y: 390
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+      parentId: iter_review
+    - data:
+        dataset_ids:
+        - cZHffurEmGLF4++iwl6iYOeAP4vIBRuQH+4yiLZ582VxPaPEyyRJsoTZcLAFlTiW
+        multiple_retrieval_config:
+          reranking_enable: true
+          reranking_mode: reranking_model
+          reranking_model:
+            model: qwen3-rerank
+            provider: langgenius/tongyi/tongyi
+          top_k: 4
+        query_attachment_selector: []
+        query_variable_selector:
+        - iter_review
+        - item
+        retrieval_mode: multiple
+        selected: false
+        title: 知识检索 2
+        type: knowledge-retrieval
+        desc: ''
+        isInIteration: true
+        iteration_id: iter_review
+      height: 90
+      id: '1789091013980'
+      position:
+        x: 1350
+        y: 540
+      positionAbsolute:
+        x: 1350
+        y: 540
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+      parentId: iter_review
+    - data:
+        dataset_ids:
+        - 3AXXlIy0xzDACtaGvaN+yU8FfyewFpLRHVrYz6MntBNdoG+ogjs+MoBZ/1QEpHyN
+        multiple_retrieval_config:
+          reranking_enable: true
+          reranking_mode: reranking_model
+          reranking_model:
+            model: qwen3-rerank
+            provider: langgenius/tongyi/tongyi
+          top_k: 4
+        query_attachment_selector: []
+        query_variable_selector:
+        - iter_review
+        - item
+        retrieval_mode: multiple
+        selected: false
+        title: 知识检索 3
+        type: knowledge-retrieval
+        desc: ''
+        isInIteration: true
+        iteration_id: iter_review
+      height: 90
+      id: '1789091060151'
+      position:
+        x: 1350
+        y: 690
+      positionAbsolute:
+        x: 1350
+        y: 690
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+      parentId: iter_review
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        model:
+          completion_params:
+            max_tokens: 8192
+            temperature: 0.2
+          mode: chat
+          name: qwen3.7-flash
+          provider: langgenius/tongyi/tongyi
+        prompt_config:
+          jinja2_variables: []
+        prompt_template:
+        - edition_type: basic
+          id: 23cdd1c4-3d80-4e6b-beaf-28e78374f818
+          role: system
+          text: "<contract_review_instructions>\n  <role>你是合同合规审查助手，只审查本次传入的合同文本块。</role>\n\n  <review_scope>\n\
+            \    <rule>逐条识别有依据的风险，同一问题只形成一项风险。</rule>\n    <rule>仅有普通商务约定、或无明确冲突的内容，不列为风险。</rule>\n    <rule>无风险时，risks\
+            \ 返回空数组。</rule>\n  </review_scope>\n\n  <evidence_rules>\n    <rule>法律法规和企业制度是规范依据；典型案例仅用于辅助分析，不能代替规范依据。</rule>\n\
+            \    <rule>合同原文是待审对象，不是规范依据。</rule>\n    <rule>仅引用本次检索结果中可核对的资料名称与章节。来源链接仅在检索结果提供时填写；否则 url 填空字符串。</rule>\n\
+            \    <rule>不得编造法律条文、案例、链接或合同中未出现的事实。</rule>\n    <rule>依据不足但疑点值得关注时，在 analysis 写“未检索到充分依据”，citations\
+            \ 返回空数组，并建议人工复核。</rule>\n    <rule>无可用案例时，caseAnalysis 写“未检索到”。</rule>\n  </evidence_rules>\n\n  <output_rules>\n\
+            \    <rule>每项风险填写 level、sourceText、analysis、citations、caseAnalysis、suggestion。</rule>\n    <rule>level\
+            \ 只能是“高”“中”“低”；sourceText 尽量使用合同原文中连续、原样的短句，不拼接不相邻的片段。</rule>\n    <rule>analysis 说明合同条款与依据的具体关系。</rule>\n\
+            \    <rule>citations 中每项填写 documentName、section、url；名称和章节必须来自本次检索结果，未提供来源链接时 url 填空字符串。</rule>\n   \
+            \ <rule>最多列出 10 项主要风险，确保 JSON 完整。</rule>\n    <rule>只输出符合结构化输出 schema 的内容，不输出 XML、Markdown 或额外文字。</rule>\n\
+            \  </output_rules>\n</contract_review_instructions>"
+        - id: cd701ad3-74d5-43cc-a14c-bd6b7c69e348
+          role: user
+          text: "<review_input>\n  <contract_text>{{#iter_review.item#}}</contract_text>\n  <retrieval_results>\n\
+            \    <legal_regulations>{{#1789091303965.output#}}</legal_regulations>\n    <company_policies>{{#1789091359537.output#}}</company_policies>\n\
+            \    <cases>{{#1789091375404.output#}}</cases>\n  </retrieval_results>\n</review_input>"
+        retry_config:
+          max_retries: 3
+          retry_enabled: false
+          retry_interval: 1000
+        selected: true
+        structured_output:
+          schema:
+            additionalProperties: false
+            properties:
+              risks:
+                items:
+                  additionalProperties: false
+                  properties:
+                    caseAnalysis:
+                      type: string
+                    citations:
+                      items:
+                        additionalProperties: false
+                        properties:
+                          documentName:
+                            type: string
+                          section:
+                            type: string
+                          url:
+                            type: string
+                        required:
+                        - documentName
+                        - section
+                        - url
+                        type: object
+                      type: array
+                    level:
+                      type: string
+                    sourceText:
+                      type: string
+                    suggestion:
+                      type: string
+                    analysis:
+                      type: string
+                  required:
+                  - level
+                  - sourceText
+                  - citations
+                  - caseAnalysis
+                  - suggestion
+                  - analysis
+                  type: object
+                type: array
+            required:
+            - risks
+            type: object
+        structured_output_enabled: true
+        title: LLM
+        type: llm
+        vision:
+          enabled: false
+        desc: ''
+        memory:
+          enabled: false
+          window:
             enabled: false
-        height: 140
-        id: retriever
-        position: {x: 380, y: 300}
-        positionAbsolute: {x: 380, y: 300}
+            size: 50
+        isInIteration: true
+        iteration_id: iter_review
+      height: 88
+      id: '1789091095600'
+      position:
+        x: 2030
+        y: 520
+      positionAbsolute:
+        x: 2030
+        y: 520
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+      parentId: iter_review
+    - data:
         selected: false
-        sourcePosition: right
-        targetPosition: left
-        type: custom
-        width: 244
-      - data:
-          context:
-            enabled: true
-            variable_selector:
-              - retriever
-              - result
-          desc: ''
-          memory:
-            enabled: false
-            window:
-              enabled: false
-              size: 50
-          model:
-            completion_params:
-              max_tokens: 1024
-              response_format: json_object
-              temperature: 0.1
-              thinking: false
-            mode: chat
-            name: deepseek-v4-flash
-            provider: langgenius/deepseek/deepseek
-          prompt_template:
-            - role: system
-              text: |
-                你是合同合规审查员。请依据参考资料判断「待审查文本」是否合规（是否违反法律法规或规章制度）。
-                判定标准：
-                1. 文本内容与参考资料中的法律法规/规章制度存在明确冲突时，才判定为不合规。
-                2. 仅凭参考资料中找不到依据的疑虑，不算不合规（判定为合规）。
-                3. 与合规无关的普通商务条款（如标的、数量、价款约定本身）不算不合规。
-                只输出 JSON，不要输出任何其他文字，格式：
-                {"is_compliant": true 或 false, "reason": "判定依据，一两句话；不合规时指出冲突的法规/制度名称及条款"}
-            - role: user
-              text: |
-                参考资料（知识库检索结果）：
-                {{#context#}}
-
-                待审查文本：
-                {{#start.chunk_text#}}
-
-                请判断该文本块是否合规，只输出 JSON。
-          retry_config:
-            enabled: false
-            exponential_backoff:
-              enabled: false
-              max_interval: 10000
-              multiplier: 2
-            max_retries: 1
-            retry_interval: 1000
-          selected: false
-          structured_output:
-            enabled: false
-          title: LLM-1 合规判定
-          type: llm
-          vision:
-            configs:
-              variable_selector: []
-            enabled: false
-        height: 220
-        id: llm_judge
-        position: {x: 680, y: 300}
-        positionAbsolute: {x: 680, y: 300}
+        template: '{{ arg1 }}'
+        title: 模板转换 2
+        type: template-transform
+        variables:
+        - value_selector:
+          - '1789090408803'
+          - result
+          value_type: array[object]
+          variable: arg1
+        desc: ''
+        isInIteration: true
+        iteration_id: iter_review
+      height: 52
+      id: '1789091303965'
+      position:
+        x: 1690
+        y: 390
+      positionAbsolute:
+        x: 1690
+        y: 390
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+      parentId: iter_review
+    - data:
         selected: false
-        sourcePosition: right
-        targetPosition: left
-        type: custom
-        width: 244
-      - data:
-          code: |
-            import json
-            import re
-
-            THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
-
-
-            def _extract_json(text: str, required_key: str):
-                """提取含目标键的 JSON 对象。
-
-                模型（尤其开启思考模式时）会在答案前后输出 <think> 思维链或 JSON 示例，
-                因此不能简单取「首个 { 到最后一个 }」，需先剥离思考块，再从后往前
-                逐个候选对象尝试解析，取最后一个含目标键的合法对象（即最终答案）。
-                """
-                text = THINK_RE.sub("", text or "")
-                fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
-                if fenced:
-                    text = fenced.group(1)
-                try:
-                    data = json.loads(text.strip())
-                    if isinstance(data, dict) and required_key in data:
-                        return data
-                except Exception:
-                    pass
-                starts = [i for i, ch in enumerate(text) if ch == "{"]
-                for start in reversed(starts):
-                    depth, in_str, escape = 0, False, False
-                    for i in range(start, len(text)):
-                        ch = text[i]
-                        if in_str:
-                            if escape:
-                                escape = False
-                            elif ch == "\\":
-                                escape = True
-                            elif ch == '"':
-                                in_str = False
-                            continue
-                        if ch == '"':
-                            in_str = True
-                        elif ch == "{":
-                            depth += 1
-                        elif ch == "}":
-                            depth -= 1
-                            if depth == 0:
-                                try:
-                                    data = json.loads(text[start:i + 1])
-                                except Exception:
-                                    break
-                                if isinstance(data, dict) and required_key in data:
-                                    return data
-                                break
-                return None
-
-
-            def main(llm_output: str) -> dict:
-                data = _extract_json(llm_output, "is_compliant")
-                if data is None:
-                    # 解析失败时默认不合规，宁可多跑一轮违规分析，不可漏审
-                    return {
-                        "is_compliant": "false",
-                        "reason": "判定结果解析失败，转入违规分析",
-                        "risks": [],
-                    }
-                is_compliant = bool(data.get("is_compliant", False))
-                default_reason = "判定为合规" if is_compliant else "判定为不合规，转入违规分析"
-                return {
-                    "is_compliant": "true" if is_compliant else "false",
-                    "reason": str(data.get("reason") or default_reason),
-                    # 合规分支固定空风险列表，供「合并风险列表」聚合器取值
-                    "risks": [],
-                    # 判定本身解析成功，错误标志恒为 false（聚合器需与 code_parse 输出同构）
-                    "parse_error": "false",
-                }
-          code_language: python3
-          desc: ''
-          outputs:
-            parse_error:
-              children: null
-              type: string
-            is_compliant:
-              children: null
-              type: string
-            reason:
-              children: null
-              type: string
-            risks:
-              children: null
-              type: array[object]
-          selected: false
-          title: 解析判定结果
-          type: code
-          variables:
-            - value_selector:
-                - llm_judge
-                - text
-              variable: llm_output
-        height: 160
-        id: code_judge
-        position: {x: 980, y: 300}
-        positionAbsolute: {x: 980, y: 300}
+        template: '{{ arg1 }}'
+        title: 模板转换 3
+        type: template-transform
+        variables:
+        - value_selector:
+          - '1789091013980'
+          - result
+          value_type: array[object]
+          variable: arg1
+        desc: ''
+        isInIteration: true
+        iteration_id: iter_review
+      height: 52
+      id: '1789091359537'
+      position:
+        x: 1690
+        y: 540
+      positionAbsolute:
+        x: 1690
+        y: 540
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+      parentId: iter_review
+    - data:
         selected: false
-        sourcePosition: right
-        targetPosition: left
-        type: custom
-        width: 244
-      - data:
-          cases:
-            - case_id: 'true'
-              conditions:
-                - comparison_operator: is
-                  id: cond-compliant-true
-                  value: 'true'
-                  varType: string
-                  variable_selector:
-                    - code_judge
-                    - is_compliant
-              id: 'true'
-              logical_operator: and
-          desc: ''
-          logical_operator: and
-          selected: false
-          title: 是否合规
-          type: if-else
-        height: 140
-        id: if_compliant
-        position: {x: 1280, y: 300}
-        positionAbsolute: {x: 1280, y: 300}
+        template: '{{ arg1 }}'
+        title: 模板转换 4
+        type: template-transform
+        variables:
+        - value_selector:
+          - '1789091060151'
+          - result
+          value_type: array[object]
+          variable: arg1
+        desc: ''
+        isInIteration: true
+        iteration_id: iter_review
+      height: 52
+      id: '1789091375404'
+      position:
+        x: 1690
+        y: 690
+      positionAbsolute:
+        x: 1690
+        y: 690
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+      parentId: iter_review
+    - data:
+        outputs:
+        - variable: chunks
+          value_selector:
+          - split_contract
+          - chunks
+          value_type: array[string]
+        - variable: results
+          value_selector:
+          - iter_review
+          - output
+          value_type: array[string]
         selected: false
-        sourcePosition: right
-        targetPosition: left
-        type: custom
-        width: 244
-      - data:
-          context:
-            enabled: true
-            variable_selector:
-              - retriever
-              - result
-          desc: ''
-          memory:
-            enabled: false
-            window:
-              enabled: false
-              size: 50
-          model:
-            completion_params:
-              max_tokens: 8192
-              response_format: json_object
-              temperature: 0.2
-              thinking: false
-            mode: chat
-            name: deepseek-v4-flash
-            provider: langgenius/deepseek/deepseek
-          prompt_template:
-            - role: system
-              text: |
-                你是企业合规审查专家。请审查待审查文本，识别违反法律法规或规章制度的风险条款。
-                输出要求：
-                1. 逐条识别违规条款，输出条款原文 clause 与风险等级 risk_level（high/medium/low）。
-                2. violations 的 law_name/article 必须来自参考资料原文，不得编造；description 说明具体违反内容。
-                3. reference_case 只能引用检索到的典型案例；无可引用案例时置为 null，此时 suggestion 改为通用合规建议。
-                4. 每条风险给出 suggestion（参考典型案例的合理化修改建议）。
-                5. 本块无风险时 risks 返回 []。
-                注意：每条 description 控制在 60 字以内，violations 最多列 3 条；
-                全文最多输出 10 条最主要的风险，务必输出完整且合法的 JSON（输出过长会被截断导致解析失败）。
-                只输出 JSON，不要输出任何其他文字，结构：
-                {"risks": [{"clause": "...", "risk_level": "high|medium|low", "violations": [{"law_name": "《...》", "article": "...", "description": "..."}], "reference_case": {"case_name": "...", "lesson": "..."} 或 null, "suggestion": "..."}]}
-            - role: user
-              text: |
-                参考资料（法条/制度/典型案例检索结果）：
-                {{#context#}}
-
-                待审查文本：
-                {{#start.chunk_text#}}
-
-                请逐条识别风险条款并按给定结构只输出 JSON。
-          retry_config:
-            enabled: false
-            exponential_backoff:
-              enabled: false
-              max_interval: 10000
-              multiplier: 2
-            max_retries: 1
-            retry_interval: 1000
-          selected: false
-          structured_output:
-            enabled: false
-          title: LLM-2 违规分析
-          type: llm
-          vision:
-            configs:
-              variable_selector: []
-            enabled: false
-        height: 260
-        id: llm_analyze
-        position: {x: 1580, y: 480}
-        positionAbsolute: {x: 1580, y: 480}
+        title: 输出
+        type: end
+        desc: ''
+      height: 114
+      id: '1789095413360'
+      position:
+        x: 3100
+        y: 300
+      positionAbsolute:
+        x: 3100
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+      zIndex: 0
+    - id: extract_doc
+      type: custom
+      data:
+        type: document-extractor
+        title: 提取合同正文
+        desc: ''
         selected: false
-        sourcePosition: right
-        targetPosition: left
-        type: custom
-        width: 244
-      - data:
-          code: |
-            import json
-            import re
-
-            THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
-
-
-            def _extract_json(text: str, required_key: str):
-                """提取含目标键的 JSON 对象（先剥思考块，再从后往前取最后一个合法对象）。"""
-                text = THINK_RE.sub("", text or "")
-                fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
-                if fenced:
-                    text = fenced.group(1)
-                try:
-                    data = json.loads(text.strip())
-                    if isinstance(data, dict) and required_key in data:
-                        return data
-                except Exception:
-                    pass
-                starts = [i for i, ch in enumerate(text) if ch == "{"]
-                for start in reversed(starts):
-                    depth, in_str, escape = 0, False, False
-                    for i in range(start, len(text)):
-                        ch = text[i]
-                        if in_str:
-                            if escape:
-                                escape = False
-                            elif ch == "\\":
-                                escape = True
-                            elif ch == '"':
-                                in_str = False
-                            continue
-                        if ch == '"':
-                            in_str = True
-                        elif ch == "{":
-                            depth += 1
-                        elif ch == "}":
-                            depth -= 1
-                            if depth == 0:
-                                try:
-                                    data = json.loads(text[start:i + 1])
-                                except Exception:
-                                    break
-                                if isinstance(data, dict) and required_key in data:
-                                    return data
-                                break
-                return None
-
-
-            def main(llm_output: str) -> dict:
-                data = _extract_json(llm_output, "risks")
-                risks = data.get("risks") if isinstance(data, dict) else None
-                if not isinstance(risks, list):
-                    # 兜底：解析失败返回空列表并标记，由人工复核该文本块
-                    return {
-                        "risks": [],
-                        "summary": "风险结果解析失败，请人工复核该文本块",
-                        "parse_error": "true",
-                    }
-                return {
-                    "risks": risks,
-                    "summary": "本块共识别出 {} 条风险".format(len(risks)),
-                    "parse_error": "false",
-                }
-          code_language: python3
-          desc: ''
-          outputs:
-            parse_error:
-              children: null
-              type: string
-            risks:
-              children: null
-              type: array[object]
-            summary:
-              children: null
-              type: string
-          selected: false
-          title: 兜底解析风险JSON
-          type: code
-          variables:
-            - value_selector:
-                - llm_analyze
-                - text
-              variable: llm_output
-        height: 180
-        id: code_parse
-        position: {x: 1880, y: 480}
-        positionAbsolute: {x: 1880, y: 480}
+        variable_selector:
+        - '1789090337990'
+        - input_file
+      height: 140
+      width: 244
+      position:
+        x: 390
+        y: 300
+      positionAbsolute:
+        x: 390
+        y: 300
+      sourcePosition: right
+      targetPosition: left
+      selected: false
+    - id: split_contract
+      type: custom
+      data:
+        type: code
+        title: 按段落切块
+        desc: ''
         selected: false
-        sourcePosition: right
-        targetPosition: left
-        type: custom
-        width: 244
-      - data:
-          advanced_settings:
-            group_enabled: false
-            groups: []
-          desc: ''
-          output_type: string
-          selected: false
-          title: 合并合规结论
-          type: variable-aggregator
-          variables:
-            - - code_judge
-              - reason
-            - - code_parse
-              - summary
-        height: 110
-        id: agg_reason
-        position: {x: 2180, y: 220}
-        positionAbsolute: {x: 2180, y: 220}
+        code: "import re\n\nMAX_CHARS = 2000\n\ndef main(text: str) -> dict:\n    paragraphs = [p.strip() for p\
+          \ in re.split(r\"\\r?\\n\", text or \"\") if p.strip()]\n    chunks, buffer, size = [], [], 0\n    for\
+          \ paragraph in paragraphs:\n        while len(paragraph) > MAX_CHARS:\n            if buffer:\n      \
+          \          chunks.append(\"\\n\".join(buffer))\n                buffer, size = [], 0\n            cut\
+          \ = max(paragraph.rfind(mark, 0, MAX_CHARS) for mark in (\"。\", \"；\", \";\", \"\\n\"))\n            cut\
+          \ = cut + 1 if cut >= MAX_CHARS // 2 else MAX_CHARS\n            chunks.append(paragraph[:cut])\n    \
+          \        paragraph = paragraph[cut:].strip()\n        if not paragraph:\n            continue\n      \
+          \  if buffer and size + len(paragraph) > MAX_CHARS:\n            chunks.append(\"\\n\".join(buffer))\n\
+          \            buffer, size = [], 0\n        buffer.append(paragraph)\n        size += len(paragraph)\n\
+          \    if buffer:\n        chunks.append(\"\\n\".join(buffer))\n    return {\"chunks\": chunks}\n"
+        code_language: python3
+        variables:
+        - variable: text
+          value_selector:
+          - extract_doc
+          - text
+        outputs:
+          chunks:
+            children: null
+            type: array[string]
+      height: 140
+      width: 244
+      position:
+        x: 700
+        y: 300
+      positionAbsolute:
+        x: 700
+        y: 300
+      sourcePosition: right
+      targetPosition: left
+      selected: false
+    - id: iter_review
+      type: custom
+      data:
+        type: iteration
+        title: 逐块合同审查
+        desc: ''
         selected: false
-        sourcePosition: right
-        targetPosition: left
-        type: custom
-        width: 244
-      - data:
-          advanced_settings:
-            group_enabled: false
-            groups: []
-          desc: ''
-          output_type: array[object]
-          selected: false
-          title: 合并风险列表
-          type: variable-aggregator
-          variables:
-            # 顺序即优先级：聚合器取「第一个非空值」。
-            # code_judge 在分支前执行、必然有值（[]），因此分支专属的 code_parse 必须排在它前面，
-            # 否则不合规分支识别出的风险会被 code_judge 的空数组覆盖。
-            - - code_parse
-              - risks
-            - - code_judge
-              - risks
-        height: 110
-        id: agg_risks
-        position: {x: 2180, y: 400}
-        positionAbsolute: {x: 2180, y: 400}
+        start_node_id: iter_review_start
+        iterator_selector:
+        - split_contract
+        - chunks
+        output_selector:
+        - pack_review
+        - payload_json
+        is_parallel: true
+        parallel_nums: 3
+        error_handle_mode: continue-on-error
+        flatten_output: true
+      height: 620
+      width: 2000
+      position:
+        x: 1030
+        y: 300
+      positionAbsolute:
+        x: 1030
+        y: 300
+      sourcePosition: right
+      targetPosition: left
+      selected: false
+    - id: iter_review_start
+      type: custom-iteration-start
+      data:
+        type: iteration-start
+        title: ''
+        desc: ''
         selected: false
-        sourcePosition: right
-        targetPosition: left
-        type: custom
-        width: 244
-      # 聚合 parse_error：区分「确无风险」与「解析失败」（后者需人工复核，不能当成合规）
-      - data:
-          advanced_settings:
-            group_enabled: false
-            groups: []
-          desc: ''
-          output_type: string
-          selected: false
-          title: 合并解析标志
-          type: variable-aggregator
-          variables:
-            # 同上：分支专属来源排在前，否则会被恒为 false 的 code_judge 覆盖
-            - - code_parse
-              - parse_error
-            - - code_judge
-              - parse_error
-        height: 110
-        id: agg_parse_error
-        position: {x: 2180, y: 560}
-        positionAbsolute: {x: 2180, y: 560}
+        isInIteration: true
+      parentId: iter_review
+      position:
+        x: 1100
+        y: 450
+      draggable: false
+      selectable: false
+      zIndex: 1002
+    - id: pack_review
+      type: custom
+      data:
+        type: code
+        title: 封装分块审查结果
+        desc: ''
         selected: false
-        sourcePosition: right
-        targetPosition: left
-        type: custom
-        width: 244
-      - data:
-          desc: ''
-          outputs:
-            - value_selector:
-                - code_judge
-                - is_compliant
-              value_type: string
-              variable: is_compliant
-            - value_selector:
-                - agg_reason
-                - output
-              value_type: string
-              variable: compliance_reason
-            - value_selector:
-                - agg_risks
-                - output
-              value_type: array[object]
-              variable: risks
-            - value_selector:
-                - agg_parse_error
-                - output
-              value_type: string
-              variable: parse_error
-          selected: false
-          title: 结束
-          type: end
-        height: 120
-        id: end
-        position: {x: 2480, y: 300}
-        positionAbsolute: {x: 2480, y: 300}
-        selected: false
-        sourcePosition: right
-        targetPosition: left
-        type: custom
-        width: 244
+        code: "import json\n\ndef main(chunk_text, report, legal_sources, policy_sources, case_sources) -> dict:\n\
+          \    return {\"payload_json\": json.dumps({\n        \"chunk_text\": chunk_text,\n        \"report\":\
+          \ report,\n        \"legal_sources\": legal_sources,\n        \"policy_sources\": policy_sources,\n  \
+          \      \"case_sources\": case_sources,\n    }, ensure_ascii=False)}\n"
+        code_language: python3
+        variables:
+        - variable: chunk_text
+          value_selector:
+          - iter_review
+          - item
+        - variable: report
+          value_selector:
+          - '1789091095600'
+          - structured_output
+        - variable: legal_sources
+          value_selector:
+          - '1789090408803'
+          - result
+        - variable: policy_sources
+          value_selector:
+          - '1789091013980'
+          - result
+        - variable: case_sources
+          value_selector:
+          - '1789091060151'
+          - result
+        outputs:
+          payload_json:
+            children: null
+            type: string
+        isInIteration: true
+        iteration_id: iter_review
+      height: 140
+      width: 244
+      position:
+        x: 2390
+        y: 520
+      positionAbsolute:
+        x: 2390
+        y: 520
+      sourcePosition: right
+      targetPosition: left
+      selected: false
+      parentId: iter_review
     viewport:
-      x: 0
-      y: 0
-      zoom: 0.7
+      x: 43.87341884368561
+      y: 250.64840279824466
+      zoom: 0.4339589955386382
+  rag_pipeline_variables: []

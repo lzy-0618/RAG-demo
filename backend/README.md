@@ -164,13 +164,15 @@ curl -s -X POST http://127.0.0.1:8000/api/v1/auth/login \
 | `GET /api/v1/review/tasks` | 任务列表（历史记录） |
 | `DELETE /api/v1/review/{task_id}` | 删除任务与落地文件 |
 
-管线：**解析 → 切块 → 逐块调 Dify 审查工作流（并发 3）→ 代码合并**，循环与进度都在后端：
+### 合同审查
 
-- `services/document_parser.py`：PDF 按页（>50 页时 3 页一块）、docx 按段落、文本按行；短文档（≤1.5 万字或 ≤10 页）合并为单块。
-- `services/review.py`：`merge_risks()` 按 `(law_name, article)` + 条款文本相似度（≥0.7）跨块去重，按风险等级与块序排序，`build_summary()` 用代码生成结论（不额外调 LLM）。
-- 两个审查类型共用同一管线，仅按 `review_type` 选择 `DIFY_CONTRACT_REVIEW_APP_KEY` / `DIFY_REGULATION_REVIEW_APP_KEY`。
+`POST /api/v1/review` 接收合同文件或文本。文件上传到 Dify；文本先写入临时 TXT 再上传，旧式 DOC 先转换为 DOCX。`dify/dsl/合同审查.yml` 在 Dify 中提取正文、按段落切成约 2000 字的文本块，并在 Iteration 中对每块分别检索法规、制度与案例，生成结构化报告。后端只调用一次工作流，不再自行解析或切分合同。
 
-### 合规安全网：绝不把「解析失败」当成「无风险」
+工作流返回等长的 `chunks` 和 `results`。后端用 `chunks[i]` 核对 `results[i]` 的风险原文，用同次法规/制度检索结果核对引用；无法核对的风险标记 `needs_review`，无结果或结构错误的块计入 `failed_chunks`。`services/review.py` 合并重复风险并生成摘要，前端轮询任务状态；合同的块数和结果在工作流完成后回填。应用 Key 为 `DIFY_CONTRACT_REVIEW_APP_KEY`。
+
+制度审查仍由 `services/document_parser.py` 解析切块，后端逐块调用独立工作流，并在逐块完成时更新进度。两个审查类型仅共用任务接口、风险合并和摘要生成。
+
+### 制度审查的解析安全网
 
 实测踩过的坑：块太大（3500 字）时，违规分析节点的 JSON 输出会超出 `max_tokens` 被截断，
 解析兜底返回空风险列表，整块被静默判为「无风险」——对合规产品是危险的假阴性。
@@ -182,4 +184,4 @@ curl -s -X POST http://127.0.0.1:8000/api/v1/auth/login \
 3. 只要有失败块，整体 `is_compliant=false`，`summary` 追加「N 个文本块审查失败，建议人工复核」。
 
 配套调整：单块字数由 3500 降到 **2000**（实测 2000 字时识别率与调用次数较平衡）；
-两个审查工作流的违规分析节点输出上限提到 8192 并在 prompt 中约束篇幅（见 `dify/dsl/*.yml`）。
+制度审查工作流的违规分析节点输出上限提到 8192 并在 prompt 中约束篇幅（见 `dify/dsl/制度审查.yml`）。

@@ -23,12 +23,23 @@ class ReferenceCase(BaseModel):
     lesson: str = ""
 
 
+class Citation(BaseModel):
+    document_name: str
+    section: str
+    url: str
+
+
 class RiskItem(BaseModel):
     """一处风险。"""
 
     clause: str = Field("", description="被判定有风险的条款原文")
     risk_level: str = Field("medium", description="high / medium / low")
     violations: list[Violation] = Field(default_factory=list)
+    analysis: str = ""
+    citations: list[Citation] = Field(default_factory=list)
+    case_analysis: str = ""
+    needs_review: bool = False
+    validation_notes: list[str] = Field(default_factory=list)
     reference_case: ReferenceCase | None = None
     suggestion: str = Field("", description="修改建议")
     chunk_index: int | None = Field(None, description="所在块序号（合并时回填）")
@@ -42,6 +53,7 @@ class ReviewResult(BaseModel):
     summary: str = ""
     total_chunks: int = 0
     failed_chunks: int = 0
+    failed_details: list[dict] = Field(default_factory=list)
     risks: list[RiskItem] = Field(default_factory=list)
 
 

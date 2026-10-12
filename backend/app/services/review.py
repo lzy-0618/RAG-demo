@@ -1,14 +1,9 @@
-"""审查业务编排（需求 ②③）：解析 → 切块 → 逐块调 Dify 工作流 → 代码合并。
-
-职责划分：
-- Dify 只做「单块审查」，不长文档循环；
-- 块级控制、进度、并发、结果合并都在后端（设计文档第 5 节），便于观测与恢复；
-- 合同审查与规章制度审查复用同一管线，仅按 review_type 选择不同的 Dify 应用 Key。
-"""
+"""审查任务编排：合同由 Dify 提取、切块和逐块审查；制度沿用后端切块。"""
 
 import asyncio
 import difflib
 import json
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -29,16 +24,13 @@ from app.core.exceptions import BizError, NotFoundError
 from app.models.base import SessionLocal
 from app.models.review import ReviewTask
 from app.services import document_parser, docx_convert
+from app.services.contract_review import validate_contract_report
 from app.services.dify import dify_client
 
 # 逐块调用的并发度：Dify 与上游模型都有速率限制，3 是速度与稳定性的折中
 CHUNK_CONCURRENCY = 3
 # 跨块合并时判定「同一风险」的条款文本相似度阈值
 CLAUSE_SIMILARITY_THRESHOLD = 0.7
-# merge_risks 回传/展示的条款原文截断长度
-CLAUSE_PREVIEW_LEN = 60
-
-
 def review_app_key(review_type: str) -> str:
     """按审查类型选择 Dify 应用 Key（合同审查 / 制度审查为两个独立应用）。"""
     if review_type == REVIEW_TYPE_REGULATION:
@@ -133,6 +125,11 @@ def merge_risks(chunks: list[dict], review_type: str) -> list[dict]:
                         "clause": clause,
                         "risk_level": str(risk.get("risk_level") or "medium").lower(),
                         "violations": _merge_violations([], risk.get("violations") or []),
+                        "analysis": str(risk.get("analysis") or ""),
+                        "citations": list(risk.get("citations") or []),
+                        "case_analysis": str(risk.get("case_analysis") or ""),
+                        "needs_review": bool(risk.get("needs_review")),
+                        "validation_notes": list(risk.get("validation_notes") or []),
                         "reference_case": case_value,
                         "suggestion": str(risk.get("suggestion") or ""),
                         "chunk_index": chunk.get("chunk_index"),
@@ -151,6 +148,23 @@ def merge_risks(chunks: list[dict], review_type: str) -> list[dict]:
                 target["suggestion"] = str(risk.get("suggestion") or "")
             if not target.get("reference_case") and case_value:
                 target["reference_case"] = case_value
+            if len(str(risk.get("analysis") or "")) > len(target.get("analysis") or ""):
+                target["analysis"] = str(risk["analysis"])
+            if not target.get("case_analysis") and risk.get("case_analysis"):
+                target["case_analysis"] = str(risk["case_analysis"])
+            target["needs_review"] = bool(target.get("needs_review") or risk.get("needs_review"))
+            for note in risk.get("validation_notes") or []:
+                if note not in target.setdefault("validation_notes", []):
+                    target["validation_notes"].append(note)
+            seen_citations = {
+                (c.get("document_name"), c.get("section"), c.get("url"))
+                for c in target.get("citations") or []
+            }
+            for citation in risk.get("citations") or []:
+                key = (citation.get("document_name"), citation.get("section"), citation.get("url"))
+                if key not in seen_citations:
+                    target.setdefault("citations", []).append(citation)
+                    seen_citations.add(key)
             if not target.get("location"):
                 target["location"] = chunk.get("location") or ""
 
@@ -166,12 +180,12 @@ def merge_risks(chunks: list[dict], review_type: str) -> list[dict]:
 async def review_text(
     text: str, review_type: str, user: str = "review", on_progress=None, on_start=None
 ) -> dict:
-    """对一段文本执行完整审查（解析切块 → 逐块审查 → 合并）。
-
-    供审查任务与「规章制度生成后的自动审查」共用，避免重复实现块级控制。
+    """审查制度文本，供「规章制度生成后的自动审查」使用。
     on_start(total) 在解析完切块后立即回调（前端可提前显示总块数），
     on_progress(completed, total, failed) 用于汇报进度（同步回调）。
     """
+    if review_type != REVIEW_TYPE_REGULATION:
+        raise ValueError("合同文本须通过 Dify 文件工作流审查")
     parsed = document_parser.merge_short_document(document_parser.parse_text(text))
     if on_start:
         on_start(len(parsed.chunks))
@@ -205,19 +219,31 @@ async def review_text(
 
     results.sort(key=lambda item: item.get("chunk_index") or 0)
     risks = merge_risks(results, review_type)
+    failed_details = [
+        {"chunk_index": item["chunk_index"], "location": item.get("location") or "",
+         "error": item.get("error") or "审查失败"}
+        for item in results if item["failed"]
+    ]
     return {
         "is_compliant": not risks and failed == 0,
         "summary": build_summary(risks, len(parsed.chunks), failed),
         "total_chunks": len(parsed.chunks),
         "failed_chunks": failed,
+        "failed_details": failed_details,
         "risks": risks,
     }
 
 
 def build_summary(risks: list[dict], total_chunks: int, failed_chunks: int) -> str:
     """生成整体审查结论（代码模板生成，不额外调 LLM）。"""
+    if failed_chunks == total_chunks and total_chunks:
+        return f"共 {total_chunks} 个文本块均审查失败，未获得可用的审查结论，建议人工复核。"
     if not risks:
-        text = f"共审查 {total_chunks} 个文本块，未发现违法违规风险条款。"
+        if failed_chunks:
+            text = (f"共 {total_chunks} 个文本块，成功审查 {total_chunks - failed_chunks} 个；"
+                    "在成功审查的文本块中未发现风险。")
+        else:
+            text = f"共审查 {total_chunks} 个文本块，未发现违法违规风险条款。"
     else:
         counts = {"high": 0, "medium": 0, "low": 0}
         for item in risks:
@@ -239,15 +265,10 @@ def build_summary(risks: list[dict], total_chunks: int, failed_chunks: int) -> s
 
 
 async def _review_chunk(
-    semaphore: asyncio.Semaphore, api_key: str, chunk: document_parser.TextChunk, user: str
+    semaphore: asyncio.Semaphore, api_key: str, chunk: document_parser.TextChunk,
+    user: str,
 ) -> dict:
-    """审查单个块；失败时不中断整体任务，标记该块失败。
-
-    合规产品不能把「解析失败」当成「无风险」：以下两种情形都标记为失败块，
-    由整体结论提示人工复核——
-    1. 工作流传回 parse_error=true（违规分析输出被截断/无法解析）；
-    2. 判定为不合规但没有风险明细（结果自相矛盾）。
-    """
+    """审查一个制度文本块；失败时不中断其余块。"""
     async with semaphore:
         try:
             result = await dify_client.run_workflow(
@@ -294,6 +315,65 @@ def _update(db: Session, task: ReviewTask, **fields) -> None:
     db.refresh(task)
 
 
+def _contract_iteration_results(outputs: dict) -> list[dict]:
+    """用 Dify 原样返回的文本块校验同一次迭代产生的报告。"""
+    chunks, reports = outputs.get("chunks"), outputs.get("results")
+    if not isinstance(chunks, list) or not all(isinstance(chunk, str) for chunk in chunks):
+        raise ValueError("Dify 未返回合同文本块数组")
+    if not isinstance(reports, list) or len(reports) != len(chunks):
+        raise ValueError("Dify 审查结果数量与文本块数量不一致")
+    results = []
+    for index, (chunk, report) in enumerate(zip(chunks, reports), start=1):
+        item = {"chunk_index": index, "location": f"第 {index} 块", "risks": []}
+        try:
+            payload = json.loads(report) if isinstance(report, str) else report
+            if not isinstance(payload, dict) or payload.get("chunk_text") != chunk:
+                raise ValueError("审查结果与当前文本块不匹配")
+            item["risks"] = validate_contract_report(payload, chunk)
+            item["failed"] = False
+        except (ValueError, TypeError) as exc:
+            item.update(failed=True, error=str(exc)[:300])
+        results.append(item)
+    return results
+
+
+async def _review_contract_file(file_path: str, user: str) -> dict:
+    """将文件交给 Dify；提取、切块和逐块审查都在同一工作流内完成。"""
+    api_key = review_app_key(REVIEW_TYPE_CONTRACT)
+    uploaded = await dify_client.upload_file(api_key, file_path, Path(file_path).name, user)
+    file_id = uploaded.get("id")
+    if not file_id:
+        raise ValueError("Dify 文件上传未返回 id")
+    inputs = {"input_file": {
+        "type": "document", "transfer_method": "local_file", "upload_file_id": file_id,
+    }}
+    finished = None
+    async for event in dify_client.run_workflow_stream(api_key, inputs, user, long_running=True):
+        if event.get("event") == "error":
+            raise ValueError(str(event.get("message") or "Dify 合同审查失败"))
+        if event.get("event") == "workflow_finished":
+            finished = event.get("data") or {}
+    if finished is None:
+        raise ValueError("Dify 合同审查未返回完成事件")
+    if finished.get("status") != "succeeded":
+        raise ValueError(str(finished.get("error") or "Dify 合同审查失败"))
+    results = _contract_iteration_results(finished.get("outputs") or {})
+    failed = sum(bool(item["failed"]) for item in results)
+    risks = merge_risks(results, REVIEW_TYPE_CONTRACT)
+    return {
+        "is_compliant": not risks and failed == 0,
+        "summary": build_summary(risks, len(results), failed),
+        "total_chunks": len(results),
+        "failed_chunks": failed,
+        "failed_details": [
+            {"chunk_index": item["chunk_index"], "location": item["location"],
+             "error": item.get("error") or "审查失败"}
+            for item in results if item["failed"]
+        ],
+        "risks": risks,
+    }
+
+
 async def run_review_task(task_id: int, source_text: str | None = None) -> None:
     """后台执行审查任务（FastAPI BackgroundTasks 调用）。
 
@@ -305,6 +385,27 @@ async def run_review_task(task_id: int, source_text: str | None = None) -> None:
         if task is None:
             return
         _update(db, task, status=REVIEW_STATUS_RUNNING, error=None)
+
+        if task.review_type == REVIEW_TYPE_CONTRACT:
+            if source_text is not None:
+                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".txt", delete=False) as temp:
+                    temp.write(source_text)
+                    file_path = temp.name
+                try:
+                    result = await _review_contract_file(file_path, task.created_by or "review")
+                finally:
+                    Path(file_path).unlink(missing_ok=True)
+            else:
+                result = await _review_contract_file(task.source_path or "", task.created_by or "review")
+            _update(
+                db, task, status=REVIEW_STATUS_COMPLETED,
+                total_chunks=result["total_chunks"],
+                completed_chunks=result["total_chunks"] - result["failed_chunks"],
+                failed_chunks=result["failed_chunks"],
+                is_compliant=result["is_compliant"], summary=result["summary"],
+                result_json=json.dumps(result, ensure_ascii=False),
+            )
+            return
 
         # 1. 解析 + 切块（短文档按阈值合并为单块）
         try:
@@ -332,7 +433,9 @@ async def run_review_task(task_id: int, source_text: str | None = None) -> None:
         failed = 0
 
         tasks = [
-            asyncio.create_task(_review_chunk(semaphore, api_key, chunk, task.created_by or "review"))
+            asyncio.create_task(_review_chunk(
+                semaphore, api_key, chunk, task.created_by or "review"
+            ))
             for chunk in parsed.chunks
         ]
         for coro in asyncio.as_completed(tasks):
@@ -356,6 +459,11 @@ async def run_review_task(task_id: int, source_text: str | None = None) -> None:
             "summary": summary,
             "total_chunks": len(parsed.chunks),
             "failed_chunks": failed,
+            "failed_details": [
+                {"chunk_index": item["chunk_index"], "location": item.get("location") or "",
+                 "error": item.get("error") or "审查失败"}
+                for item in chunk_results if item["failed"]
+            ],
             "risks": risks,
         }
         _update(
@@ -433,7 +541,12 @@ def parse_result(task: ReviewTask) -> dict | None:
     if not task.result_json:
         return None
     try:
-        return json.loads(task.result_json)
+        result = json.loads(task.result_json)
+        if (isinstance(result, dict) and result.get("total_chunks")
+                and result.get("failed_chunks") == result.get("total_chunks")
+                and not result.get("risks")):
+            result["summary"] = build_summary([], result["total_chunks"], result["failed_chunks"])
+        return result
     except json.JSONDecodeError:
         return None
 

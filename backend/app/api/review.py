@@ -1,6 +1,6 @@
 """审查路由：合同审查与规章制度审查（需求 ②③）。
 
-任务式接口：提交后立即返回 task_id，后台异步执行「解析 → 切块 → 逐块审查 → 合并」，
+任务式接口：提交后立即返回 task_id，后台异步执行审查并汇总，
 前端轮询 GET /review/{task_id} 获取进度与结果（长文档审查耗时可达数分钟，长连接易断）。
 """
 
@@ -39,7 +39,7 @@ async def submit_review(
         file_bytes=file_bytes,
         created_by=current_user,
     )
-    # 文件型任务由后台按 source_path 解析；文本型任务直接把内容带入后台
+    # 文件型任务传 source_path；合同由 Dify 提取和切块，制度由后端解析。
     background_tasks.add_task(
         review_service.run_review_task,
         task.id,
