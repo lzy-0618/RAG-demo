@@ -21,7 +21,6 @@
 | 层 | 选型 |
 | --- | --- |
 | 前端（Web） | Vue 3 + Vite + TypeScript + Element Plus + Pinia + Vue Router 4 |
-| 前端（App） | Vue 3 + Capacitor 8（只含登录与智能问答，`android/` 为原生工程） |
 | 后端 | Python 3.11+ / FastAPI（异步 + SSE 流式） |
 | AI 编排 | Dify（自托管，内置知识库 + 工作流/Agent） |
 | 文档处理 | `python-docx`、`docxtpl`；解析以 Dify 内置为主 |
@@ -32,7 +31,6 @@
 ```
 RAG_demo/
 ├── frontend/         # Web 端（全部业务页面）
-├── frontend-app/     # App 端（登录 + 问答，含 android/ 原生工程）
 ├── backend/          # FastAPI：api/ services/ models/ schemas/ core/
 ├── dify/             # 工作流 DSL 导出、知识库配置说明、导入脚本
 ├── data/             # 示例语料（法律法规、合同范本、审核规则等）
@@ -40,8 +38,6 @@ RAG_demo/
 ├── start.command     # 一键重启脚本（停旧服务 → Dify → 后端 → 前端）
 └── AGENTS.md         # 项目开发约定（分层、命名、Git 规范）
 ```
-
-两端前端**各自独立、代码不共享**：Web 端不引入任何 `@capacitor/*` 依赖，App 端只保留 `/login` 与 `/chat`。这是为换取两端可独立定制而有意接受的代价。
 
 ## 快速开始
 
@@ -80,23 +76,12 @@ npm run dev                    # http://localhost:5173
 
 `frontend` 的 Vite 开发服务器已配置代理，`/api` 转发到 `http://127.0.0.1:8000`，因此本地开发无需改 `VITE_API_BASE_URL`。
 
-### 3. App 端（Android）
-
-```bash
-cd frontend-app
-cp .env.example .env.android   # 真机调试把地址改成 Mac 的局域网 IP
-npm run cap:run                # build --mode android + cap sync + 运行
-```
-
-打包与真机调试细节见 `docs/Android App 打包与运行说明.md`。
-
 ## 配置
 
 所有真实密钥只存本地 `.env`，不入库；每个服务都提供 `.env.example` 作为模板。
 
 - `backend/.env`：`DIFY_BASE_URL`、知识库 `DIFY_API_KEY`、各业务应用的 API Key（按场景隔离）、`DATASET_ID_*`、`JWT_SECRET`、种子账号等。
 - `frontend/.env`：`VITE_API_BASE_URL`（开发期留空走代理）。
-- `frontend-app/.env.android`：App 构建的后端地址（`--mode android` 读取），随本机/局域网变化，**不提交**。
 
 ## 文档
 
@@ -106,7 +91,6 @@ npm run cap:run                # build --mode android + cap sync + 运行
 | `docs/Dify应用与工作流设计.md` | Dify 应用与工作流的编排设计 |
 | `docs/合同模板导入与合同生成实现思路.md` | 模板导入与合同生成链路 |
 | `docs/PDF中文字体渲染问题排查经验.md` | docx → PDF 中文渲染踩坑 |
-| `docs/Android App 打包与运行说明.md` | App 构建、真机调试、CORS/明文 HTTP |
 
 ## 许可证
 

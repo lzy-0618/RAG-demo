@@ -2,8 +2,6 @@
 
 企业合规智能平台 **Web 端**。开发期通过 Vite 代理把 `/api` 转发到后端 `http://127.0.0.1:8000`，见 `vite.config.ts`。
 
-> 安卓 App 端是另一个独立工程 `frontend-app/`，两端代码不共享。改这里只影响 Web。打包流程见 `docs/Android App 打包与运行说明.md`。
-
 ## 本地运行
 
 ```bash

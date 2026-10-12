@@ -19,9 +19,6 @@ htmlcov/
 .env
 .env.local
 !.env.example
-# App 端构建配置：值随本机/局域网变化，按 .env.example 自行创建
-frontend-app/.env.android
-
 # === 运行期数据（本地库、上传文件、生成产物） ===
 *.db
 *.sqlite3

@@ -343,8 +343,7 @@ function onLogout() {
   overflow: hidden;
 }
 
-/* 窄屏：侧栏收成编号索引，标题回落，保证不溢出。
-   完整的移动端方案（表格卡片化等）留在后续阶段。 */
+/* 窄屏：侧栏收成编号索引，标题回落，保证不溢出。 */
 @media (max-width: 1024px) {
   .aside {
     width: 68px;
