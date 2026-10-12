@@ -22,10 +22,27 @@ let pollTimer: number | undefined
 const isRunning = computed(
   () => task.value?.status === 'pending' || task.value?.status === 'running',
 )
+const contractStage = computed(() =>
+  task.value?.progress?.stage ?? (task.value?.status === 'completed' ? 'done' : 'upload'),
+)
+const processSteps = [
+  { key: 'upload', label: '文档上传' },
+  { key: 'parse', label: '文档解析' },
+  { key: 'review', label: '条款审核' },
+] as const
+function stepState(index: number) {
+  const current = ['upload', 'parse', 'review', 'done'].indexOf(contractStage.value)
+  if (index < current) return 'done'
+  if (index > current) return 'waiting'
+  return task.value?.status === 'failed' ? 'failed' : 'current'
+}
 const progress = computed(() => {
   const t = task.value
   if (!t?.total_chunks) return 0
-  return Math.round(((t.completed_chunks + t.failed_chunks) / t.total_chunks) * 100)
+  const processed = t.review_type === 'contract' && t.progress
+    ? t.progress.processed_chunks
+    : t.completed_chunks + t.failed_chunks
+  return Math.min(100, Math.round((processed / t.total_chunks) * 100))
 })
 const canSubmit = computed(() =>
   props.reviewType === 'contract' || inputMode.value === 'file'
@@ -137,15 +154,45 @@ onBeforeUnmount(stopPolling)
         <h2 class="sec-head flush">审查进度</h2>
         <span class="hint u-num">
           {{ task.status === 'completed' ? '已完成' : task.status === 'failed' ? '失败' : '进行中' }}
-          · 已审查 {{ task.completed_chunks }}/{{ task.total_chunks }} 块
+          <template v-if="task.review_type !== 'contract' || task.total_chunks || contractStage === 'review'">
+            · 已处理 {{ task.review_type === 'contract' && task.progress ? task.progress.processed_chunks : task.completed_chunks + task.failed_chunks }}/{{ task.total_chunks || '—' }} 块
+          </template>
           <template v-if="task.failed_chunks">（失败 {{ task.failed_chunks }} 块）</template>
         </span>
       </div>
+      <ol v-if="task.review_type === 'contract' && task.progress" class="process-steps">
+        <li
+          v-for="(step, index) in processSteps"
+          :key="step.key"
+          class="process-step"
+          :data-state="stepState(index)"
+        >
+          <span class="step-marker u-num">{{ String(index + 1).padStart(2, '0') }}</span>
+          <div class="step-body">
+            <div class="step-heading">
+              <span>{{ step.label }}</span>
+              <span class="step-state">{{ stepState(index) === 'done' ? '已完成' : stepState(index) === 'failed' ? '失败' : stepState(index) === 'current' ? '进行中' : '待开始' }}</span>
+            </div>
+            <template v-if="step.key === 'review' && stepState(index) === 'current'">
+              <ul v-if="task.progress.active_chunks.length" class="chunk-list">
+                <li v-for="chunk in task.progress.active_chunks" :key="chunk.index">
+                  <span class="u-num">第 {{ chunk.index }} 块</span>
+                  <span class="chunk-phase">{{ chunk.phase === 'retrieval' ? '数据库检索' : '大模型生成' }}</span>
+                </li>
+              </ul>
+              <p v-else class="hint step-hint">
+                {{ task.progress.processed_chunks && task.progress.processed_chunks === task.total_chunks ? '正在汇总审核结果' : '正在准备条款审核' }}
+              </p>
+            </template>
+          </div>
+        </li>
+      </ol>
       <el-progress
         :percentage="progress"
         :status="task.status === 'failed' ? 'exception' : undefined"
       />
       <p v-if="task.source_name" class="hint file-name">文件：{{ task.source_name }}</p>
+      <el-alert v-if="task.status === 'failed' && task.error" class="mt" :title="task.error" type="error" :closable="false" />
     </el-card>
 
     <el-card v-if="task?.status === 'completed' && task.result" class="mt">
@@ -211,5 +258,105 @@ onBeforeUnmount(stopPolling)
 
 .file-name {
   margin: var(--space-3) 0 0;
+}
+
+.process-steps {
+  display: grid;
+  gap: 0;
+  margin: 0 0 var(--space-5);
+  padding: 0;
+  list-style: none;
+}
+
+.process-step {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: var(--space-3);
+  min-height: 52px;
+}
+
+.step-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.process-step[data-state='done'] .step-marker {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.process-step[data-state='current'] .step-marker {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.process-step[data-state='failed'] .step-marker {
+  border-color: var(--risk);
+  color: var(--risk);
+}
+
+.step-body {
+  padding: 4px 0 var(--space-3);
+  border-bottom: 1px solid var(--rule);
+}
+
+.process-step:last-child .step-body {
+  border-bottom: 0;
+}
+
+.step-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  color: var(--ink);
+  font-size: var(--fs-sm);
+}
+
+.step-state {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.process-step[data-state='current'] .step-state {
+  color: var(--accent);
+}
+
+.process-step[data-state='failed'] .step-state {
+  color: var(--risk);
+}
+
+.chunk-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chunk-list li {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: var(--fs-xs);
+}
+
+.chunk-phase {
+  color: var(--accent);
+}
+
+.step-hint {
+  margin: var(--space-2) 0 0;
 }
 </style>

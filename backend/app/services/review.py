@@ -30,6 +30,103 @@ from app.services.dify import dify_client
 CHUNK_CONCURRENCY = 3
 # 跨块合并时判定「同一风险」的条款文本相似度阈值
 CLAUSE_SIMILARITY_THRESHOLD = 0.7
+CONTRACT_RETRIEVAL_NODES = {"1789090408803", "1789091013980", "1789091060151"}
+CONTRACT_LLM_NODE = "1789091095600"
+# 与 dify/dsl/合同审查.yml 的 iter_review.parallel_nums 保持一致。
+CONTRACT_PARALLEL_CHUNKS = 3
+
+
+def _contract_progress(stage: str = "upload") -> dict:
+    return {"stage": stage, "processed_chunks": 0, "active_chunks": []}
+
+
+def _save_contract_progress(db: Session, task: ReviewTask, progress: dict) -> None:
+    _update(db, task, result_json=json.dumps({"_progress": progress}, ensure_ascii=False))
+
+
+def _iteration_chunk(data: dict) -> int | None:
+    metadata = data.get("execution_metadata") or {}
+    index = metadata.get("iteration_index")
+    if index is None:
+        index = data.get("iteration_index", (data.get("metadata") or {}).get("iterator_index"))
+    if isinstance(index, int) and not isinstance(index, bool) and index >= 0:
+        return index + 1
+    return None
+
+
+def _apply_contract_event(
+    progress: dict,
+    event: dict,
+    done_indices: set[int],
+    retrieval_done: dict[int, set[str]],
+    queued_indices: list[int],
+) -> bool:
+    """将 Dify 节点事件映射为审查进度；并行迭代按块号独立更新。"""
+    kind = event.get("event")
+    data = event.get("data") or {}
+    node_id = str(data.get("node_id") or "")
+    active = {item["index"]: item["phase"] for item in progress["active_chunks"]}
+    changed = False
+
+    if kind == "node_finished" and node_id == "split_contract":
+        chunks = (data.get("outputs") or {}).get("chunks")
+        if isinstance(chunks, list):
+            progress["total_chunks"] = len(chunks)
+            changed = True
+    elif kind == "iteration_started" and node_id == "iter_review":
+        progress["stage"] = "review"
+        length = (data.get("metadata") or {}).get("iterator_length")
+        if isinstance(length, int) and length >= 0:
+            progress["total_chunks"] = length
+        changed = True
+    elif kind == "iteration_next" and node_id == "iter_review":
+        raw_index = data.get("index")
+        if isinstance(raw_index, int) and not isinstance(raw_index, bool) and raw_index >= 0:
+            index = raw_index + 1
+            if index not in queued_indices and index not in done_indices:
+                queued_indices.append(index)
+                if len(active) < CONTRACT_PARALLEL_CHUNKS:
+                    active[index] = "retrieval"
+                    changed = True
+    elif kind == "node_started" and node_id in CONTRACT_RETRIEVAL_NODES | {CONTRACT_LLM_NODE}:
+        index = _iteration_chunk(data)
+        if index is not None and index not in done_indices:
+            progress["stage"] = "review"
+            phase = "generation" if node_id == CONTRACT_LLM_NODE else "retrieval"
+            # 并行检索节点可能交错；同一块进入生成后不退回检索。
+            if active.get(index) != "generation" or phase == "generation":
+                active[index] = phase
+            changed = True
+    elif kind == "node_finished" and node_id in CONTRACT_RETRIEVAL_NODES:
+        index = _iteration_chunk(data)
+        if index is not None and index not in done_indices:
+            completed = retrieval_done.setdefault(index, set())
+            completed.add(node_id)
+            active[index] = "generation" if completed == CONTRACT_RETRIEVAL_NODES else "retrieval"
+            changed = True
+    elif kind == "node_finished":
+        if node_id == "pack_review":
+            index = _iteration_chunk(data)
+            if index is not None and index not in done_indices:
+                done_indices.add(index)
+                active.pop(index, None)
+                progress["processed_chunks"] = len(done_indices)
+                for waiting in queued_indices:
+                    if waiting not in done_indices and waiting not in active:
+                        active[waiting] = "retrieval"
+                        break
+                changed = True
+    elif kind == "iteration_completed" and node_id == "iter_review":
+        active.clear()
+        changed = True
+
+    if changed:
+        progress["active_chunks"] = [
+            {"index": index, "phase": phase} for index, phase in sorted(active.items())
+        ]
+    return changed
+
+
 def review_app_key(review_type: str) -> str:
     """按审查类型选择 Dify 应用 Key（合同审查 / 制度审查为两个独立应用）。"""
     if review_type == REVIEW_TYPE_REGULATION:
@@ -336,20 +433,30 @@ def _contract_iteration_results(outputs: dict) -> list[dict]:
     return results
 
 
-async def _review_contract_file(file_path: str, user: str) -> dict:
+async def _review_contract_file(file_path: str, user: str, db: Session, task: ReviewTask) -> dict:
     """将文件交给 Dify；提取、切块和逐块审查都在同一工作流内完成。"""
     api_key = review_app_key(REVIEW_TYPE_CONTRACT)
     uploaded = await dify_client.upload_file(api_key, file_path, Path(file_path).name, user)
     file_id = uploaded.get("id")
     if not file_id:
         raise ValueError("Dify 文件上传未返回 id")
+    progress = _contract_progress("parse")
+    _save_contract_progress(db, task, progress)
     inputs = {"input_file": {
         "type": "document", "transfer_method": "local_file", "upload_file_id": file_id,
     }}
     finished = None
+    done_indices: set[int] = set()
+    retrieval_done: dict[int, set[str]] = {}
+    queued_indices: list[int] = []
     async for event in dify_client.run_workflow_stream(api_key, inputs, user, long_running=True):
         if event.get("event") == "error":
             raise ValueError(str(event.get("message") or "Dify 合同审查失败"))
+        if _apply_contract_event(progress, event, done_indices, retrieval_done, queued_indices):
+            _update(
+                db, task, result_json=json.dumps({"_progress": progress}, ensure_ascii=False),
+                total_chunks=progress.get("total_chunks", task.total_chunks),
+            )
         if event.get("event") == "workflow_finished":
             finished = event.get("data") or {}
     if finished is None:
@@ -386,7 +493,9 @@ async def run_review_task(task_id: int, source_text: str | None = None) -> None:
         _update(db, task, status=REVIEW_STATUS_RUNNING, error=None)
 
         if task.review_type == REVIEW_TYPE_CONTRACT:
-            result = await _review_contract_file(task.source_path or "", task.created_by or "review")
+            result = await _review_contract_file(
+                task.source_path or "", task.created_by or "review", db, task
+            )
             _update(
                 db, task, status=REVIEW_STATUS_COMPLETED,
                 total_chunks=result["total_chunks"],
@@ -500,6 +609,8 @@ async def create_task(
         status=REVIEW_STATUS_PENDING,
         created_by=created_by,
     )
+    if review_type == REVIEW_TYPE_CONTRACT:
+        task.result_json = json.dumps({"_progress": _contract_progress()}, ensure_ascii=False)
 
     if file_bytes:
         reviews_dir = Path(settings.UPLOAD_DIR) / "reviews"
@@ -534,6 +645,8 @@ def parse_result(task: ReviewTask) -> dict | None:
         return None
     try:
         result = json.loads(task.result_json)
+        if isinstance(result, dict) and "_progress" in result:
+            return None
         if (isinstance(result, dict) and result.get("total_chunks")
                 and result.get("failed_chunks") == result.get("total_chunks")
                 and not result.get("risks")):
@@ -541,6 +654,18 @@ def parse_result(task: ReviewTask) -> dict | None:
         return result
     except json.JSONDecodeError:
         return None
+
+
+def get_progress(task: ReviewTask) -> dict | None:
+    if task.review_type != REVIEW_TYPE_CONTRACT:
+        return None
+    if task.status == REVIEW_STATUS_COMPLETED:
+        return {"stage": "done", "processed_chunks": task.total_chunks, "active_chunks": []}
+    try:
+        value = json.loads(task.result_json or "{}")
+    except json.JSONDecodeError:
+        return None
+    return value.get("_progress") if isinstance(value, dict) else None
 
 
 def list_tasks(

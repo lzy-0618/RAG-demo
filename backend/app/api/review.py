@@ -17,7 +17,9 @@ router = APIRouter(prefix="/review", tags=["审查"])
 
 
 def _task_payload(task) -> dict:
-    return ReviewTaskOut.from_model(task, review_service.parse_result(task)).model_dump()
+    return ReviewTaskOut.from_model(
+        task, review_service.parse_result(task), review_service.get_progress(task)
+    ).model_dump()
 
 
 @router.post("")

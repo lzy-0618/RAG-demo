@@ -57,6 +57,17 @@ class ReviewResult(BaseModel):
     risks: list[RiskItem] = Field(default_factory=list)
 
 
+class ActiveReviewChunk(BaseModel):
+    index: int
+    phase: str  # retrieval / generation
+
+
+class ReviewProgress(BaseModel):
+    stage: str  # upload / parse / review / done
+    processed_chunks: int = 0
+    active_chunks: list[ActiveReviewChunk] = Field(default_factory=list)
+
+
 class ReviewTaskOut(BaseModel):
     """审查任务出参（进度 + 结果）。"""
 
@@ -73,9 +84,12 @@ class ReviewTaskOut(BaseModel):
     created_at: str | None = None
     updated_at: str | None = None
     result: ReviewResult | None = None
+    progress: ReviewProgress | None = None
 
     @classmethod
-    def from_model(cls, task, result: ReviewResult | None = None) -> "ReviewTaskOut":
+    def from_model(
+        cls, task, result: ReviewResult | None = None, progress: ReviewProgress | None = None
+    ) -> "ReviewTaskOut":
         return cls(
             id=task.id,
             review_type=task.review_type,
@@ -90,4 +104,5 @@ class ReviewTaskOut(BaseModel):
             created_at=task.created_at.isoformat(sep=" ") if task.created_at else None,
             updated_at=task.updated_at.isoformat(sep=" ") if task.updated_at else None,
             result=result,
+            progress=progress,
         )

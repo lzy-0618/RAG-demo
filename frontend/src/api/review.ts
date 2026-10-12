@@ -58,6 +58,11 @@ export interface ReviewTaskOut {
   created_at: string | null
   updated_at: string | null
   result: ReviewResult | null
+  progress: {
+    stage: 'upload' | 'parse' | 'review' | 'done'
+    processed_chunks: number
+    active_chunks: { index: number; phase: 'retrieval' | 'generation' }[]
+  } | null
 }
 
 /** 提交审查任务：文本或文件二选一，返回 task_id 供轮询 */
