@@ -21,6 +21,10 @@ class TextDocumentCreate(BaseModel):
     text: str = Field(..., min_length=1, description="文本内容")
 
 
+class ChunkUpdate(BaseModel):
+    content: str = Field(..., min_length=1, description="修改后的分块内容")
+
+
 class DocumentOut(BaseModel):
     """知识库文档出参（本地元数据）。"""
 

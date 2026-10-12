@@ -6,11 +6,15 @@ import {
   deleteDocument,
   listDatasets,
   listDocuments,
+  listSegments,
+  listChildChunks,
   refreshDocument,
   syncDataset,
+  updateSegment,
+  updateChildChunk,
   uploadDocument,
 } from '@/api/knowledge'
-import type { DatasetOut, DocumentOut } from '@/api/knowledge'
+import type { ChildChunkOut, DatasetOut, DocumentOut, SegmentOut } from '@/api/knowledge'
 import { useMediaQuery } from '@/composables/useMediaQuery'
 import { formatDateTime } from '@/utils/format'
 
@@ -24,6 +28,18 @@ const loading = ref(false)
 const uploading = ref(false)
 const syncing = ref(false)
 const fileList = ref<UploadUserFile[]>([])
+const detailVisible = ref(false)
+const detailDoc = ref<DocumentOut | null>(null)
+const segments = ref<SegmentOut[]>([])
+const segmentTotal = ref(0)
+const segmentPage = ref(1)
+const segmentLoading = ref(false)
+const docForm = ref('')
+type ChildrenState = { expanded: boolean; loading: boolean; items: ChildChunkOut[]; total: number; page: number }
+const children = ref<Record<string, ChildrenState>>({})
+const editorVisible = ref(false)
+const editing = ref<{ segmentId: string; childId?: string; content: string } | null>(null)
+const saving = ref(false)
 
 // 六列全宽合计约 750px；窄于 1100 时收起次要列，
 // 否则右侧固定操作列会压住「上传人 / 上传时间」
@@ -129,6 +145,91 @@ async function onDelete(doc: DocumentOut) {
   await loadDocuments()
 }
 
+async function openDocument(doc: DocumentOut) {
+  detailDoc.value = doc
+  detailVisible.value = true
+  segmentPage.value = 1
+  segmentTotal.value = 0
+  docForm.value = ''
+  segments.value = []
+  children.value = {}
+  editorVisible.value = false
+  await loadSegments()
+}
+
+async function loadSegments() {
+  const doc = detailDoc.value
+  if (!doc) return
+  segmentLoading.value = true
+  try {
+    const res = await listSegments(doc.id, segmentPage.value)
+    if (detailDoc.value?.id !== doc.id) return
+    segments.value = res.data?.data ?? []
+    segmentTotal.value = res.data?.total ?? 0
+    docForm.value = res.data?.doc_form ?? ''
+    children.value = {}
+  } finally {
+    segmentLoading.value = false
+  }
+}
+
+async function loadChildren(segmentId: string) {
+  const doc = detailDoc.value
+  const state = children.value[segmentId]
+  if (!doc || !state) return
+  state.loading = true
+  try {
+    const res = await listChildChunks(doc.id, segmentId, state.page)
+    if (detailDoc.value?.id !== doc.id || !children.value[segmentId]) return
+    state.items = res.data?.data ?? []
+    state.total = res.data?.total ?? 0
+  } finally {
+    state.loading = false
+  }
+}
+
+async function toggleChildren(segmentId: string) {
+  const state = children.value[segmentId] ?? {
+    expanded: false, loading: false, items: [], total: 0, page: 1,
+  }
+  children.value[segmentId] = state
+  state.expanded = !state.expanded
+  if (state.expanded && !state.items.length) await loadChildren(segmentId)
+}
+
+function startEdit(segmentId: string, content: string, childId?: string) {
+  editing.value = { segmentId, childId, content }
+  editorVisible.value = true
+}
+
+async function saveEdit() {
+  const doc = detailDoc.value
+  const item = editing.value
+  if (!doc || !item) return
+  if (!item.content.trim()) {
+    ElMessage.warning('分块内容不能为空')
+    return
+  }
+  saving.value = true
+  try {
+    if (item.childId) {
+      await updateChildChunk(doc.id, item.segmentId, item.childId, item.content)
+      await loadChildren(item.segmentId)
+    } else {
+      await updateSegment(doc.id, item.segmentId, item.content)
+      const res = await listSegments(doc.id, segmentPage.value)
+      if (detailDoc.value?.id === doc.id) {
+        segments.value = res.data?.data ?? []
+        segmentTotal.value = res.data?.total ?? 0
+      }
+    }
+    editorVisible.value = false
+    ElMessage.success('分块已保存，Dify 正在更新索引')
+  } finally {
+    saving.value = false
+  }
+}
+
 function onFileChange(_file: UploadFile, files: UploadUserFile[]) {
   fileList.value = files
 }
@@ -190,7 +291,11 @@ onBeforeUnmount(() => {
       </div>
 
       <el-table v-loading="loading" :data="documents" empty-text="暂无文档">
-        <el-table-column prop="title" label="标题" min-width="200" show-overflow-tooltip />
+        <el-table-column label="标题" min-width="200" show-overflow-tooltip>
+          <template #default="{ row }">
+            <el-button link type="primary" class="title-link" @click="openDocument(row)">{{ row.title }}</el-button>
+          </template>
+        </el-table-column>
         <el-table-column v-if="showExtras" label="类型" width="80">
           <template #default="{ row }">{{ row.doc_type === 'text' ? '文本' : '文件' }}</template>
         </el-table-column>
@@ -229,6 +334,67 @@ onBeforeUnmount(() => {
         @current-change="loadDocuments"
       />
     </el-card>
+
+    <el-drawer v-model="detailVisible" :title="detailDoc?.title ?? '文档分块'" size="min(760px, 95vw)" @closed="detailDoc = null">
+      <div v-loading="segmentLoading" class="detail-body">
+        <p class="chunk-summary">
+          分块方式：{{ docForm === 'hierarchical_model' ? '父子分块' : docForm === 'qa_model' ? '问答分块' : docForm === 'text_model' ? '普通分块' : docForm || '读取中' }}
+          · 共 {{ segmentTotal }} 块
+          <el-button link type="primary" @click="loadSegments">刷新分块</el-button>
+        </p>
+        <el-empty v-if="!segmentLoading && !segments.length" description="暂无分块；若文档仍在解析，请稍后刷新" />
+        <article v-for="(segment, index) in segments" :key="segment.id" class="chunk-card">
+          <div class="chunk-heading">
+            <strong>第 {{ segment.position ?? (segmentPage - 1) * 20 + index + 1 }} 块</strong>
+            <span class="chunk-meta">{{ segment.tokens ?? segment.word_count ?? '—' }} {{ segment.tokens != null ? 'tokens' : '字' }} · {{ segment.status ?? '状态未知' }}</span>
+            <el-button link type="primary" @click="startEdit(segment.id, segment.content)">修改</el-button>
+          </div>
+          <pre class="chunk-content">{{ segment.content }}</pre>
+          <p v-if="segment.answer" class="chunk-answer">答案：{{ segment.answer }}</p>
+          <template v-if="docForm === 'hierarchical_model'">
+            <el-button link type="primary" @click="toggleChildren(segment.id)">
+              {{ children[segment.id]?.expanded ? '收起子块' : '查看子块' }}
+            </el-button>
+            <div v-if="children[segment.id]?.expanded" v-loading="children[segment.id]?.loading" class="child-list">
+              <p class="chunk-meta">共 {{ children[segment.id]?.total ?? 0 }} 个子块</p>
+              <article v-for="(child, childIndex) in children[segment.id]?.items ?? []" :key="child.id" class="child-card">
+                <div class="chunk-heading">
+                  <strong>子块 {{ ((children[segment.id]?.page ?? 1) - 1) * 20 + childIndex + 1 }}</strong>
+                  <span class="chunk-meta">{{ child.tokens ?? child.word_count ?? '—' }} {{ child.tokens != null ? 'tokens' : '字' }} · {{ child.status ?? '状态未知' }}</span>
+                  <el-button link type="primary" @click="startEdit(segment.id, child.content, child.id)">修改</el-button>
+                </div>
+                <pre class="chunk-content">{{ child.content }}</pre>
+              </article>
+              <el-pagination
+                v-if="(children[segment.id]?.total ?? 0) > 20"
+                v-model:current-page="children[segment.id].page"
+                layout="total, prev, pager, next"
+                :page-size="20"
+                :total="children[segment.id].total"
+                @current-change="loadChildren(segment.id)"
+              />
+            </div>
+          </template>
+        </article>
+        <el-pagination
+          v-if="segmentTotal > 20"
+          v-model:current-page="segmentPage"
+          layout="total, prev, pager, next"
+          :page-size="20"
+          :total="segmentTotal"
+          @current-change="loadSegments"
+        />
+      </div>
+    </el-drawer>
+
+    <el-dialog v-model="editorVisible" title="修改分块内容" width="min(680px, 92vw)" append-to-body>
+      <el-input v-if="editing" v-model="editing.content" type="textarea" :rows="12" maxlength="20000" show-word-limit />
+      <p class="chunk-meta">保存后会更新 Dify 中的分块及索引，原始上传文件不会改变。</p>
+      <template #footer>
+        <el-button @click="editorVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="saveEdit">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -267,4 +433,16 @@ onBeforeUnmount(() => {
   justify-content: flex-end;
   margin-top: var(--space-4);
 }
+
+.title-link { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detail-body { min-height: 160px; }
+.chunk-summary { margin: 0 0 var(--space-4); color: var(--muted); }
+.chunk-card, .child-card { border: 1px solid var(--el-border-color); border-radius: 8px; padding: var(--space-4); margin-bottom: var(--space-3); }
+.child-list { margin: var(--space-2) 0 0 var(--space-4); }
+.child-card { background: var(--el-fill-color-lighter); }
+.chunk-heading { display: flex; align-items: center; gap: var(--space-3); }
+.chunk-heading .el-button { margin-left: auto; }
+.chunk-meta { color: var(--muted); font-size: var(--fs-xs); }
+.chunk-content { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; margin: var(--space-3) 0 0; }
+.chunk-answer { white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 0; }
 </style>

@@ -286,6 +286,51 @@ class DifyClient:
             _ensure_ok(resp, "查询文档详情")
             return resp.json()
 
+    async def list_segments(
+        self, api_key: str, dataset_id: str, document_id: str, page: int, limit: int
+    ) -> dict:
+        url = f"{self.base_url}/v1/datasets/{dataset_id}/documents/{document_id}/segments"
+        async with _client() as client:
+            resp = await client.get(url, params={"page": page, "limit": limit}, headers=self._headers(api_key))
+            _ensure_ok(resp, "查询文档分块")
+            return resp.json()
+
+    async def list_child_chunks(
+        self, api_key: str, dataset_id: str, document_id: str,
+        segment_id: str, page: int, limit: int,
+    ) -> dict:
+        url = (
+            f"{self.base_url}/v1/datasets/{dataset_id}/documents/{document_id}"
+            f"/segments/{segment_id}/child_chunks"
+        )
+        async with _client() as client:
+            resp = await client.get(url, params={"page": page, "limit": limit}, headers=self._headers(api_key))
+            _ensure_ok(resp, "查询子分块")
+            return resp.json()
+
+    async def update_segment(
+        self, api_key: str, dataset_id: str, document_id: str,
+        segment_id: str, content: str,
+    ) -> dict:
+        url = f"{self.base_url}/v1/datasets/{dataset_id}/documents/{document_id}/segments/{segment_id}"
+        async with _client() as client:
+            resp = await client.post(url, json={"segment": {"content": content}}, headers=self._headers(api_key))
+            _ensure_ok(resp, "修改文档分块")
+            return resp.json()
+
+    async def update_child_chunk(
+        self, api_key: str, dataset_id: str, document_id: str,
+        segment_id: str, child_chunk_id: str, content: str,
+    ) -> dict:
+        url = (
+            f"{self.base_url}/v1/datasets/{dataset_id}/documents/{document_id}"
+            f"/segments/{segment_id}/child_chunks/{child_chunk_id}"
+        )
+        async with _client() as client:
+            resp = await client.patch(url, json={"content": content}, headers=self._headers(api_key))
+            _ensure_ok(resp, "修改子分块")
+            return resp.json()
+
     async def indexing_status(self, api_key: str, dataset_id: str, batch_id: str) -> dict:
         """按批次查询文档索引状态（上传后异步索引，轮询更新 Document.status）。
 

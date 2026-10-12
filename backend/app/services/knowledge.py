@@ -304,6 +304,49 @@ def get_document(db: Session, document_id: int) -> Document:
     return doc
 
 
+def _dify_location(doc: Document) -> tuple[str, str]:
+    if not doc.dify_document_id:
+        raise BizError(message="文档尚未在 Dify 中创建，无法查看分块")
+    dataset_id, _ = resolve_dataset(doc.dataset_key)
+    return dataset_id, doc.dify_document_id
+
+
+async def list_document_segments(doc: Document, page: int, page_size: int) -> dict:
+    dataset_id, dify_id = _dify_location(doc)
+    return await dify_client.list_segments(
+        settings.DIFY_API_KEY, dataset_id, dify_id, page, page_size
+    )
+
+
+async def list_segment_children(
+    doc: Document, segment_id: str, page: int, page_size: int
+) -> dict:
+    dataset_id, dify_id = _dify_location(doc)
+    return await dify_client.list_child_chunks(
+        settings.DIFY_API_KEY, dataset_id, dify_id, segment_id, page, page_size
+    )
+
+
+async def update_document_segment(doc: Document, segment_id: str, content: str) -> dict:
+    if not content.strip():
+        raise BizError(message="分块内容不能为空")
+    dataset_id, dify_id = _dify_location(doc)
+    return await dify_client.update_segment(
+        settings.DIFY_API_KEY, dataset_id, dify_id, segment_id, content
+    )
+
+
+async def update_segment_child(
+    doc: Document, segment_id: str, child_id: str, content: str
+) -> dict:
+    if not content.strip():
+        raise BizError(message="子分块内容不能为空")
+    dataset_id, dify_id = _dify_location(doc)
+    return await dify_client.update_child_chunk(
+        settings.DIFY_API_KEY, dataset_id, dify_id, segment_id, child_id, content
+    )
+
+
 async def sync_from_dify(db: Session, dataset_key: str) -> dict:
     """把 Dify 中已存在的文档补录到本地表。
 

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_user, get_db
 from app.schemas.common import ok
-from app.schemas.knowledge import DocumentOut, TextDocumentCreate
+from app.schemas.knowledge import ChunkUpdate, DocumentOut, TextDocumentCreate
 from app.services import knowledge as knowledge_service
 
 router = APIRouter(prefix="/knowledge", tags=["知识库"])
@@ -101,6 +101,58 @@ async def refresh_document(
     doc = knowledge_service.get_document(db, document_id)
     doc = await knowledge_service.sync_status(db, doc)
     return ok(DocumentOut.from_model(doc))
+
+
+@router.get("/documents/{document_id}/segments")
+async def list_document_segments(
+    document_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: str = Depends(get_current_user),
+):
+    doc = knowledge_service.get_document(db, document_id)
+    return ok(await knowledge_service.list_document_segments(doc, page, page_size))
+
+
+@router.get("/documents/{document_id}/segments/{segment_id}/children")
+async def list_segment_children(
+    document_id: int,
+    segment_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: str = Depends(get_current_user),
+):
+    doc = knowledge_service.get_document(db, document_id)
+    return ok(await knowledge_service.list_segment_children(doc, segment_id, page, page_size))
+
+
+@router.put("/documents/{document_id}/segments/{segment_id}")
+async def update_document_segment(
+    document_id: int,
+    segment_id: str,
+    request: ChunkUpdate,
+    db: Session = Depends(get_db),
+    current_user: str = Depends(get_current_user),
+):
+    doc = knowledge_service.get_document(db, document_id)
+    return ok(await knowledge_service.update_document_segment(doc, segment_id, request.content))
+
+
+@router.put("/documents/{document_id}/segments/{segment_id}/children/{child_id}")
+async def update_segment_child(
+    document_id: int,
+    segment_id: str,
+    child_id: str,
+    request: ChunkUpdate,
+    db: Session = Depends(get_db),
+    current_user: str = Depends(get_current_user),
+):
+    doc = knowledge_service.get_document(db, document_id)
+    return ok(await knowledge_service.update_segment_child(
+        doc, segment_id, child_id, request.content
+    ))
 
 
 @router.delete("/documents/{document_id}")

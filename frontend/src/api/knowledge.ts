@@ -29,6 +29,39 @@ export interface PageResult<T> {
   page_size: number
 }
 
+export interface SegmentOut {
+  id: string
+  position?: number
+  content: string
+  answer?: string | null
+  word_count?: number
+  tokens?: number
+  status?: string
+}
+
+export interface ChildChunkOut {
+  id: string
+  content: string
+  word_count?: number
+  tokens?: number
+  status?: string
+}
+
+export interface SegmentPage {
+  data: SegmentOut[]
+  doc_form: string
+  total: number
+  page: number
+  limit: number
+}
+
+export interface ChildChunkPage {
+  data: ChildChunkOut[]
+  total: number
+  page: number
+  limit: number
+}
+
 export function listDatasets() {
   return http.get<never, ApiResult<DatasetOut[]>>('/knowledge/datasets')
 }
@@ -65,4 +98,31 @@ export function refreshDocument(id: number) {
 
 export function deleteDocument(id: number) {
   return http.delete<never, ApiResult<{ id: number }>>(`/knowledge/documents/${id}`)
+}
+
+export function listSegments(id: number, page = 1, pageSize = 20) {
+  return http.get<never, ApiResult<SegmentPage>>(`/knowledge/documents/${id}/segments`, {
+    params: { page, page_size: pageSize },
+  })
+}
+
+export function listChildChunks(id: number, segmentId: string, page = 1, pageSize = 20) {
+  return http.get<never, ApiResult<ChildChunkPage>>(
+    `/knowledge/documents/${id}/segments/${segmentId}/children`,
+    { params: { page, page_size: pageSize } },
+  )
+}
+
+export function updateSegment(id: number, segmentId: string, content: string) {
+  return http.put<never, ApiResult<{ data: SegmentOut }>>(
+    `/knowledge/documents/${id}/segments/${segmentId}`,
+    { content },
+  )
+}
+
+export function updateChildChunk(id: number, segmentId: string, childId: string, content: string) {
+  return http.put<never, ApiResult<{ data: ChildChunkOut }>>(
+    `/knowledge/documents/${id}/segments/${segmentId}/children/${childId}`,
+    { content },
+  )
 }

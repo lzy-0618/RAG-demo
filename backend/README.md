@@ -124,6 +124,10 @@ uvicorn app.main:app --reload --port 8000
 | `POST /api/v1/knowledge/upload` | 文件入库（multipart：`dataset_key` + `file`） |
 | `POST /api/v1/knowledge/text` | 文本入库（审核规则、专家标注等） |
 | `GET /api/v1/knowledge/documents` | 本地文档列表（`dataset_key` 过滤 + 分页） |
+| `GET /api/v1/knowledge/documents/{id}/segments` | 分页查看 Dify 实际文档分块及分块方式 |
+| `GET /api/v1/knowledge/documents/{id}/segments/{segment_id}/children` | 分页查看父子分块的子块 |
+| `PUT /api/v1/knowledge/documents/{id}/segments/{segment_id}` | 修改 Dify 分块内容并重新索引 |
+| `PUT /api/v1/knowledge/documents/{id}/segments/{segment_id}/children/{child_id}` | 修改子块内容并重新索引 |
 | `POST /api/v1/knowledge/documents/{id}/refresh` | 轮询 Dify 索引状态并回写 |
 | `DELETE /api/v1/knowledge/documents/{id}` | 删除（Dify 与本地同步） |
 
