@@ -11,8 +11,6 @@ const props = defineProps<{
   reviewType: 'contract' | 'regulation'
 }>()
 
-const inputMode = ref<'text' | 'file'>(props.reviewType === 'contract' ? 'file' : 'text')
-const content = ref('')
 const reviewFile = ref<File | null>(null)
 const submitting = ref(false)
 const task = ref<ReviewTaskOut | null>(null)
@@ -44,23 +42,18 @@ const progress = computed(() => {
     : t.completed_chunks + t.failed_chunks
   return Math.min(100, Math.round((processed / t.total_chunks) * 100))
 })
-const canSubmit = computed(() =>
-  props.reviewType === 'contract' || inputMode.value === 'file'
-    ? !!reviewFile.value
-    : content.value.trim().length > 0,
-)
+const canSubmit = computed(() => !!reviewFile.value)
 
 async function onSubmit() {
-  if (!canSubmit.value || submitting.value) {
-    ElMessage.warning(props.reviewType === 'contract' || inputMode.value === 'file' ? '请选择待审查文件' : '请输入待审查文本')
+  if (!reviewFile.value || submitting.value) {
+    ElMessage.warning('请选择待审查文件')
     return
   }
   submitting.value = true
   try {
     const res = await submitReview({
       reviewType: props.reviewType,
-      content: props.reviewType === 'regulation' && inputMode.value === 'text' ? content.value : undefined,
-      file: props.reviewType === 'contract' || inputMode.value === 'file' ? (reviewFile.value ?? undefined) : undefined,
+      file: reviewFile.value,
     })
     ElMessage.success('已提交审查，正在处理')
     task.value = null
@@ -100,7 +93,6 @@ function stopPolling() {
 function reset() {
   stopPolling()
   task.value = null
-  content.value = ''
   reviewFile.value = null
 }
 
@@ -113,28 +105,10 @@ onBeforeUnmount(stopPolling)
       <h2 class="sec-head">提交待审查内容</h2>
 
       <FileDropzone
-        v-if="reviewType === 'contract'"
         v-model="reviewFile"
         accept=".pdf,.doc,.docx,.md,.txt"
         hint="长文档会自动分块逐块审查；.doc 上传后自动转换为 .docx"
       />
-      <el-tabs v-else v-model="inputMode">
-        <el-tab-pane label="文本输入" name="text">
-          <el-input
-            v-model="content"
-            type="textarea"
-            :rows="8"
-            placeholder="粘贴待审查的合同/制度文本"
-          />
-        </el-tab-pane>
-        <el-tab-pane label="文件上传" name="file">
-          <FileDropzone
-            v-model="reviewFile"
-            accept=".pdf,.doc,.docx,.md,.txt"
-            :hint="`长文档会自动分块逐块审查；.doc 上传后自动转换为 .docx`"
-          />
-        </el-tab-pane>
-      </el-tabs>
 
       <div class="actions">
         <el-button

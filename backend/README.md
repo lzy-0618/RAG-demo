@@ -163,7 +163,7 @@ curl -s -X POST http://127.0.0.1:8000/api/v1/auth/login \
 
 | 接口 | 说明 |
 | --- | --- |
-| `POST /api/v1/review` | 提交审查（multipart：合同用 `review_type=contract` + `file`；制度用 `review_type=regulation` + `content` 或 `file`），立即返回 `task_id` |
+| `POST /api/v1/review` | 提交审查（multipart：合同用 `review_type=contract` + `file`；制度用 `review_type=regulation` + `file`），立即返回 `task_id` |
 | `GET /api/v1/review/{task_id}` | 查询进度与结果（前端轮询，`completed`/`failed` 后停止） |
 | `GET /api/v1/review/tasks` | 任务列表（历史记录） |
 | `DELETE /api/v1/review/{task_id}` | 删除任务与落地文件 |
@@ -176,7 +176,7 @@ curl -s -X POST http://127.0.0.1:8000/api/v1/auth/login \
 
 ### 制度审查
 
-制度与合同共用文件工作流调用，使用独立的 `DIFY_REGULATION_REVIEW_APP_KEY`。上传文件直接交给 Dify；文本输入和制度生成后的自动审查先写为 TXT 再上传。后端接收 `chunks/results`，校验分块原文及本次法规、制度检索证据，不要求案例检索或案例分析字段。页面返回的风险结构保持兼容，并提供与合同一致的阶段和分块进度。
+制度与合同共用文件工作流调用，使用独立的 `DIFY_REGULATION_REVIEW_APP_KEY`。上传文件直接交给 Dify；页面与提交接口仅支持文件上传；制度生成后的内部自动审查仍将生成正文写为 TXT 再上传。后端接收 `chunks/results`，校验分块原文及本次法规、制度检索证据，不要求案例检索或案例分析字段。页面返回的风险结构保持兼容，并提供与合同一致的阶段和分块进度。
 
 分块缺失、结果错位、非法报告均不能视为合规：数量不一致或空正文导致任务失败，单块报告错误计入 `failed_chunks`；存在失败块时整体 `is_compliant=false`。未经证据核对的风险保留 `needs_review` 标记。制度生成的修正反馈包含新结构的 `analysis` 和 `citations`，避免丢失冲突依据。
 

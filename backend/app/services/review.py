@@ -413,11 +413,8 @@ async def _review_file(
     }
 
 
-async def run_review_task(task_id: int, source_text: str | None = None) -> None:
-    """后台执行审查任务（FastAPI BackgroundTasks 调用）。
-
-    source_text 为空时从任务记录的 source_path 读取文件。
-    """
+async def run_review_task(task_id: int) -> None:
+    """后台读取任务的 source_path 文件并执行审查。"""
     db = SessionLocal()
     try:
         task = db.get(ReviewTask, task_id)
@@ -432,12 +429,6 @@ async def run_review_task(task_id: int, source_text: str | None = None) -> None:
                 completed_chunks=progress["processed_chunks"],
             )
 
-        if source_text is not None and not task.source_path:
-            reviews_dir = Path(settings.UPLOAD_DIR) / "reviews"
-            reviews_dir.mkdir(parents=True, exist_ok=True)
-            path = reviews_dir / f"{uuid.uuid4().hex}.txt"
-            path.write_text(source_text, encoding="utf-8")
-            _update(db, task, source_path=str(path))
         result = await _review_file(
             task.source_path or "", task.review_type, task.created_by or "review", on_event
         )
@@ -461,46 +452,42 @@ async def create_task(
     db: Session,
     *,
     review_type: str,
-    content: str | None,
     filename: str | None,
-    file_bytes: bytes | None,
+    file_bytes: bytes,
     created_by: str | None,
 ) -> ReviewTask:
-    """创建审查任务：文本在后台写为 TXT，文件落地到 uploads/reviews（legacy .doc 先归一化为 .docx）。
+    """创建审查任务：文件落地到 uploads/reviews（legacy .doc 先归一化为 .docx）。
 
     归一化放在这里而不是解析处：.doc 是二进制老格式，解析器只认 OOXML，
     在入口转一次，后台审查与后续任何消费者都只需处理一种格式。
     """
     if review_type not in (REVIEW_TYPE_CONTRACT, REVIEW_TYPE_REGULATION):
         raise BizError(message=f"未知的审查类型：{review_type}")
-    if review_type == REVIEW_TYPE_CONTRACT and content is not None:
-        raise BizError(message="合同审查仅支持文件上传")
-    if not content and not file_bytes:
-        raise BizError(message="请提供待审查文件" if review_type == REVIEW_TYPE_CONTRACT else "请提供待审查的文本内容或文件")
+    if not file_bytes:
+        raise BizError(message="请提供非空的待审查文件")
 
     task = ReviewTask(
         review_type=review_type,
-        input_type="file" if file_bytes else "text",
+        input_type="file",
         source_name=filename,
         status=REVIEW_STATUS_PENDING,
         created_by=created_by,
     )
     task.result_json = json.dumps({"_progress": _review_progress()}, ensure_ascii=False)
 
-    if file_bytes:
-        reviews_dir = Path(settings.UPLOAD_DIR) / "reviews"
-        reviews_dir.mkdir(parents=True, exist_ok=True)
-        suffix = Path(filename or "").suffix.lower() or ".txt"
-        original = reviews_dir / f"{uuid.uuid4().hex}{suffix}"
-        original.write_bytes(file_bytes)
-        target = original
-        if docx_convert.is_legacy_doc(original):
-            try:
-                target = await docx_convert.convert_legacy_doc(original, reviews_dir)
-            finally:
-                # 原始 .doc 不再被 task.source_path 引用，留着就是删除任务时清不掉的孤儿
-                original.unlink(missing_ok=True)
-        task.source_path = str(target)
+    reviews_dir = Path(settings.UPLOAD_DIR) / "reviews"
+    reviews_dir.mkdir(parents=True, exist_ok=True)
+    suffix = Path(filename or "").suffix.lower() or ".txt"
+    original = reviews_dir / f"{uuid.uuid4().hex}{suffix}"
+    original.write_bytes(file_bytes)
+    target = original
+    if docx_convert.is_legacy_doc(original):
+        try:
+            target = await docx_convert.convert_legacy_doc(original, reviews_dir)
+        finally:
+            # 原始 .doc 不再被 task.source_path 引用，留着就是删除任务时清不掉的孤儿
+            original.unlink(missing_ok=True)
+    task.source_path = str(target)
 
     db.add(task)
     db.commit()

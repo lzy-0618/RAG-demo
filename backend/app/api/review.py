@@ -26,18 +26,16 @@ def _task_payload(task) -> dict:
 async def submit_review(
     background_tasks: BackgroundTasks,
     review_type: str = Form(REVIEW_TYPE_CONTRACT, description="contract / regulation"),
-    content: str | None = Form(None, description="制度审查文本（与 file 二选一；合同审查仅支持文件）"),
-    file: UploadFile | None = File(None, description="待审查文件 pdf/doc/docx/md/txt"),
+    file: UploadFile = File(..., description="待审查文件 pdf/doc/docx/md/txt"),
     db: Session = Depends(get_db),
     current_user: str = Depends(get_current_user),
 ):
-    """提交审查任务：合同上传文件；制度可选文本或文件。"""
-    file_bytes = await file.read() if file else None
+    """提交审查任务：合同与制度均仅支持文件上传。"""
+    file_bytes = await file.read()
     task = await review_service.create_task(
         db,
         review_type=review_type,
-        content=content,
-        filename=file.filename if file else None,
+        filename=file.filename,
         file_bytes=file_bytes,
         created_by=current_user,
     )
@@ -45,7 +43,6 @@ async def submit_review(
     background_tasks.add_task(
         review_service.run_review_task,
         task.id,
-        None if file_bytes else content,
     )
     return ok({"task_id": task.id, "status": task.status, "total_chunks": task.total_chunks})
 

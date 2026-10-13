@@ -65,16 +65,14 @@ export interface ReviewTaskOut {
   } | null
 }
 
-/** 提交审查任务：文本或文件二选一，返回 task_id 供轮询 */
+/** 提交审查任务：仅支持文件上传，返回 task_id 供轮询 */
 export function submitReview(params: {
   reviewType: 'contract' | 'regulation'
-  content?: string
-  file?: File
+  file: File
 }) {
   const form = new FormData()
   form.append('review_type', params.reviewType)
-  if (params.content) form.append('content', params.content)
-  if (params.file) form.append('file', params.file)
+  form.append('file', params.file)
   return http.post<never, ApiResult<{ task_id: number; status: string }>>('/review', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
