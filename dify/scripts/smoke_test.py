@@ -6,17 +6,18 @@
     cd backend && .venv/bin/python ../dify/scripts/smoke_test.py
 
 校验四条业务链路是否真正可用（不只是 HTTP 200，而是输出内容符合预期）：
-  1. 合同审查：传含明显违规条款的合同 → 期望 is_compliant=false 且 risks 非空
+  1. 合同审查：上传含明显违规条款的 TXT → Dify 提取切块并由后端校验报告
   2. 制度审查：传与现行制度冲突的制度条款 → 期望 is_compliant=false 且 risks 非空
   3. 合规咨询：提问 → 期望有回答且带引用来源
   4. 规章制度生成：mode=outline → 期望返回大纲文本、sections_json 为空
 """
 
 import asyncio
-import json
 import os
 import sys
+import tempfile
 import time
+from pathlib import Path
 
 import httpx
 
@@ -24,6 +25,7 @@ import httpx
 sys.path.insert(0, os.getcwd())
 
 from app.core.config import settings  # noqa: E402
+from app.services.review import _review_file, review_text  # noqa: E402
 
 BASE = settings.DIFY_BASE_URL.rstrip("/")
 
@@ -45,28 +47,25 @@ async def _post(client: httpx.AsyncClient, path: str, key: str, body: dict) -> t
 
 
 async def check_contract_review(client: httpx.AsyncClient) -> tuple[bool, str]:
-    code, data, cost = await _post(
-        client, "/v1/workflows/run", settings.DIFY_CONTRACT_REVIEW_APP_KEY,
-        {"inputs": {"chunk_text": CONTRACT_TEXT}, "response_mode": "blocking", "user": "smoke"},
-    )
-    out = (data.get("data") or {}).get("outputs") or {}
-    risks = out.get("risks") or []
-    ok = code == 200 and out.get("is_compliant") == "false" and len(risks) > 0
-    detail = f"{cost:.1f}s is_compliant={out.get('is_compliant')} risks={len(risks)}"
-    if risks:
-        detail += f" 首条依据={risks[0].get('violations', [{}])[0].get('law_name', '?')}"
-    return ok, detail
+    t0 = time.time()
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".txt", delete=False) as temp:
+        temp.write(CONTRACT_TEXT)
+        file_path = temp.name
+    try:
+        result = await _review_file(file_path, "contract", "smoke")
+    finally:
+        Path(file_path).unlink(missing_ok=True)
+    risks = result["risks"]
+    ok = bool(risks) and result["failed_chunks"] == 0
+    return ok, f"{time.time() - t0:.1f}s chunks={result['total_chunks']} risks={len(risks)} failed={result['failed_chunks']}"
 
 
 async def check_regulation_review(client: httpx.AsyncClient) -> tuple[bool, str]:
-    code, data, cost = await _post(
-        client, "/v1/workflows/run", settings.DIFY_REGULATION_REVIEW_APP_KEY,
-        {"inputs": {"chunk_text": REGULATION_TEXT}, "response_mode": "blocking", "user": "smoke"},
-    )
-    out = (data.get("data") or {}).get("outputs") or {}
-    risks = out.get("risks") or []
-    ok = code == 200 and out.get("is_compliant") == "false" and len(risks) > 0
-    return ok, f"{cost:.1f}s is_compliant={out.get('is_compliant')} risks={len(risks)}"
+    t0 = time.time()
+    result = await review_text(REGULATION_TEXT, "regulation", "smoke")
+    risks = result["risks"]
+    ok = bool(risks) and result["failed_chunks"] == 0
+    return ok, f"{time.time() - t0:.1f}s chunks={result['total_chunks']} risks={len(risks)} failed={result['failed_chunks']}"
 
 
 async def check_chatflow(client: httpx.AsyncClient) -> tuple[bool, str]:

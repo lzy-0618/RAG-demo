@@ -2,13 +2,8 @@ import http from './http'
 import type { ApiResult } from './http'
 import type { PageResult } from './knowledge'
 
-export interface RiskItem {
-  clause: string
-  risk_level: string
-  violations: Array<{ law_name: string; article: string; description: string }>
-  suggestion: string
-  location?: string | null
-}
+import type { RiskItem } from './review'
+export type { RiskItem } from './review'
 
 export interface GenerationTaskOut {
   id: number

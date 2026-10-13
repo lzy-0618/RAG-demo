@@ -41,7 +41,7 @@ async def submit_review(
         file_bytes=file_bytes,
         created_by=current_user,
     )
-    # 文件型任务传 source_path；合同由 Dify 提取和切块，制度由后端解析。
+    # 文件型任务传 source_path；合同与制度均由 Dify 提取和切块。
     background_tasks.add_task(
         review_service.run_review_task,
         task.id,

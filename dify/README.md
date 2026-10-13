@@ -7,7 +7,7 @@
 | 应用 | 类型 | DSL 文件 | 状态 |
 | --- | --- | --- | --- |
 | 合同审查（需求②） | Workflow | `dsl/合同审查.yml` | ✅ 已导入联调；Dify 提取、切块、迭代审查 |
-| 制度审查（需求③） | Workflow | `dsl/制度审查.yml` | ✅ 已定稿 · 已联调 |
+| 制度审查（需求③） | Workflow | `dsl/制度审查.yml` | 文件工作流已适配后端；2026-10-13 合成样例联调通过 |
 | 合规咨询（需求④） | Chatflow | `dsl/合规咨询.yml` | ✅ 已定稿 · 已联调 |
 | 规章制度生成（需求⑧） | Workflow | `dsl/规章制度生成.yml` | ✅ 已定稿 · 已联调 |
 | 合同模板结构化（需求⑥） | Workflow | `dsl/合同模板结构化.yml` | ✅ 已定稿 · 已联调 |
@@ -15,7 +15,7 @@
 
 ### 联调状态（2026-09-13 验证）
 
-合同审查的新工作流已在 Dify 验证。下表保留其他应用此前的联调记录；可用冒烟脚本复测：
+合同审查的新工作流已在 Dify 验证。下表保留其他应用此前的联调记录（制度审查为旧版 `chunk_text` 接口，不能作为新版文件工作流的验证结果）；可用冒烟脚本复测：
 
 ```bash
 cd backend && .venv/bin/python ../dify/scripts/smoke_test.py
@@ -71,7 +71,7 @@ bash dify/scripts/validate.sh          # 默认容器 docker-api-1
 
 部署 `dsl/合同审查.yml`。工作流顺序：`Start(input_file)` → 文档提取器 → Code 按段落切块（约 2000 字）→ Iteration 对每块分别检索法规、制度和典型案例 → Qwen 一次生成结构化报告 → Code 封装该块原文、报告及三路检索原始结果 → End 返回 `chunks` 和 `results` 两个等长数组。
 
-后端仅上传文件、接收工作流结果、校验风险原文与本次法规/制度检索证据、合并风险并保存任务。文本输入写入临时 `.txt` 后同样交给 Dify；旧式 `.doc` 在上传前转换为 `.docx`。制度审查仍使用原有后端解析与切块。
+后端仅上传文件、接收工作流结果、校验风险原文与本次法规/制度检索证据、合并风险并保存任务。文本输入写入临时 `.txt` 后同样交给 Dify；旧式 `.doc` 在上传前转换为 `.docx`。制度审查使用相同文件调用与结果校验链路，仅检索法规和制度两库。
 
 部署步骤：
 
@@ -88,38 +88,32 @@ bash dify/scripts/validate.sh          # 默认容器 docker-api-1
 
 ### 编排
 
-制度审查沿用原有两段式判定、分支、聚合器和单 End，关键配置：
+与当前合同审查采用相同主流程：`Start(input_file)` → 文档提取器 → Code 按段落切块（约 2000 字）→ Iteration 逐块审查 → Code 封装分块结果 → End。
 
-- 知识检索只挂 **2 库**：法律法规库、某钢规章制度库（无案例/审核规则/专家标注），Top K 5。
-- LLM-1 判定语义为**冲突检测**：是否与上位法/现行制度冲突、越权或矛盾；文字表述/格式问题不算不合规。
-- LLM-2 输出**无 `reference_case` 字段**，`violations`（law_name/article/description）与合同审查同名同构，`suggestion` 依据被冲突的上位条款给出。
-- Code 节点兜底逻辑相同（解析失败按不合规处理）。
+迭代内并行检索 **国家法律法规库、某钢现行规章制度库**，分别经模板转换送入 Qwen，审查新制度是否与国家法律法规、某钢现行规章制度管理办法及相关条款冲突。沿用合同审查的模型、检索参数和迭代配置；移除典型案例检索及模板节点，不输出案例字段。
 
-### 变量表
+提示词要求核对适用范围、权限、审批程序及管理标准等实际冲突，排除纯文字/格式问题；引用必须来自本次检索，缺乏充分依据的疑点须明确标注待人工复核，不作已确认冲突。当前分块未出现某内容不代表整份制度缺失该内容。
 
-Start 接收后端传入的 `chunk_text`；End 返回 `is_compliant`、`compliance_reason`、`risks` 和 `parse_error`。
+### 输入输出
 
-**End 输出**：
+- 输入 `input_file`：一份新的规章制度文件，支持 `.pdf`、`.docx`、`.md`、`.txt`。
+- 输出 `chunks`：分块原文数组；`results`：各块封装 JSON 字符串数组，与合同审查一致。
+- 每个封装结果包含 `chunk_text`、`report`、`legal_sources`、`policy_sources`。
+- `report.risks` 每项包含 `level`（高/中/低）、`sourceText`、`analysis`、`citations`（documentName/section/url）、`suggestion`；无冲突时为空数组。无 `caseAnalysis` 或 `case_sources`。
 
-```json
-{
-  "is_compliant": "true 或 false（字符串）",
-  "compliance_reason": "合规：判定依据 / 不合规：冲突条数摘要",
-  "risks": [ { "clause": "...", "risk_level": "...", "violations": [{"law_name": "《法规/制度名》", "article": "...", "description": "冲突说明"}], "suggestion": "..." } ]
-}
-```
+### 部署与接口迁移
 
-### 部署步骤
-
-1. 导入 `dsl/制度审查.yml`。
-2. 「知识检索」节点绑定 2 个知识库：**法律法规库、某钢规章制度库**。
-3. 确认 DeepSeek 供应商已配置；发布后生成 API Secret → 填入 `DIFY_REGULATION_REVIEW_APP_KEY`。
+1. 在 Dify 导入 `dsl/制度审查.yml`，确认文档提取、切块及迭代节点连接正常。
+2. 两路知识库绑定沿用合同 DSL 的法规库和制度库标识，导入后核对实际绑定；制度库须包含某钢现行有效的规章制度管理办法，不绑定案例库。
+3. 确认 Qwen 对话模型及 rerank 模型已配置，先在 Dify 直接上传文件验证。
+4. 后端制度审查和生成后的自动审查均上传文件、传 `input_file` 并解析 `chunks/results`，使用 `DIFY_REGULATION_REVIEW_APP_KEY`。文本输入写为 TXT 后走同一工作流；页面展示上传、提取和逐块审核进度。重新发布应用并重启未启用热重载的后端后联调。
 
 ### 验证用例
 
-- **无冲突文本**：输入一段与上位依据不冲突的制度条文 → 期望 `is_compliant="true"`、`risks=[]`。
-- **冲突文本**：输入与检索到的现行制度/法规明显矛盾的条款（如权限、审批层级、限额冲突）→ 期望 `is_compliant="false"`，`risks[].violations` 列明具体冲突的法规/制度名称与条款号。
-- **编辑问题过滤**：输入仅有错别字/格式问题的文本 → 期望判定为合规（不把编辑问题当合规问题）。
+- 上传多段制度文件，核对分块与结果数量，风险原文能在对应文本块中找到。
+- 输入与检索到的法规或现行制度管理办法明确矛盾的条款，核对引用及修改建议。
+- 仅有文字/格式问题时不列为冲突；证据不足的疑点不作确定的违规结论。
+- 确认只有法规、制度两路检索，输出中无案例字段；执行失败的分块由后端计入 `failed_chunks`，不能视为合规。
 
 ---
 
@@ -198,7 +192,7 @@ Start(requirement, mode, outline, previous_sections, review_conflicts, revision_
 sections = run_workflow(mode=document)                # 第 1 次生成
 round = 0
 while True:
-    review = 切块调用「制度审查」应用 → 合并去重        # 复用应用三
+    review = 全文写为 TXT 调用「制度审查」文件工作流 → 合并去重        # 复用应用三
     if review.is_compliant or round >= 3: break
     round += 1
     sections = run_workflow(mode=document, outline=...,

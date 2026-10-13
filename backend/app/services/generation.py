@@ -111,6 +111,9 @@ def _conflicts_for_feedback(review: dict) -> str:
                 "clause": risk.get("clause"),
                 "risk_level": risk.get("risk_level"),
                 "violations": risk.get("violations") or [],
+                "analysis": risk.get("analysis") or "",
+                "citations": risk.get("citations") or [],
+                "needs_review": bool(risk.get("needs_review")),
                 "suggestion": risk.get("suggestion"),
             }
         )

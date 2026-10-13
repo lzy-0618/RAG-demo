@@ -227,6 +227,10 @@ onBeforeUnmount(stopPolling)
         :location="risk.location"
         :clause="risk.clause"
         :violations="risk.violations"
+        :analysis="risk.analysis"
+        :citations="risk.citations"
+        :needs-review="risk.needs_review"
+        :validation-notes="risk.validation_notes"
         :suggestion="risk.suggestion"
       />
 

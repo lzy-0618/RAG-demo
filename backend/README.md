@@ -174,18 +174,10 @@ curl -s -X POST http://127.0.0.1:8000/api/v1/auth/login \
 
 工作流返回等长的 `chunks` 和 `results`。后端用 `chunks[i]` 核对 `results[i]` 的风险原文，用同次法规/制度检索结果核对引用；无法核对的风险标记 `needs_review`，无结果或结构错误的块计入 `failed_chunks`。`services/review.py` 合并重复风险并生成摘要；同时把 Dify 节点事件映射为上传、解析和逐块审核进度，前端轮询展示各并行块的数据库检索或大模型生成阶段。应用 Key 为 `DIFY_CONTRACT_REVIEW_APP_KEY`。
 
-制度审查仍由 `services/document_parser.py` 解析切块，后端逐块调用独立工作流，并在逐块完成时更新进度。两个审查类型仅共用任务接口、风险合并和摘要生成。
+### 制度审查
 
-### 制度审查的解析安全网
+制度与合同共用文件工作流调用，使用独立的 `DIFY_REGULATION_REVIEW_APP_KEY`。上传文件直接交给 Dify；文本输入和制度生成后的自动审查先写为 TXT 再上传。后端接收 `chunks/results`，校验分块原文及本次法规、制度检索证据，不要求案例检索或案例分析字段。页面返回的风险结构保持兼容，并提供与合同一致的阶段和分块进度。
 
-实测踩过的坑：块太大（3500 字）时，违规分析节点的 JSON 输出会超出 `max_tokens` 被截断，
-解析兜底返回空风险列表，整块被静默判为「无风险」——对合规产品是危险的假阴性。
+分块缺失、结果错位、非法报告均不能视为合规：数量不一致或空正文导致任务失败，单块报告错误计入 `failed_chunks`；存在失败块时整体 `is_compliant=false`。未经证据核对的风险保留 `needs_review` 标记。制度生成的修正反馈包含新结构的 `analysis` 和 `citations`，避免丢失冲突依据。
 
-后端现在的处理（`_review_chunk`）：
-
-1. 工作流回传 `parse_error=true` → 该块计为**失败块**；
-2. 判定为不合规但风险明细为空（结果自相矛盾）→ 同样计为**失败块**；
-3. 只要有失败块，整体 `is_compliant=false`，`summary` 追加「N 个文本块审查失败，建议人工复核」。
-
-配套调整：单块字数由 3500 降到 **2000**（实测 2000 字时识别率与调用次数较平衡）；
-制度审查工作流的违规分析节点输出上限提到 8192 并在 prompt 中约束篇幅（见 `dify/dsl/制度审查.yml`）。
+回归检查：`cd backend && .venv/bin/python -m unittest discover -s tests -v`（模拟 Dify 流式响应与文件上传，并使用临时 SQLite 校验任务落库；不调用真实模型）。

@@ -1,4 +1,4 @@
-"""校验分类检索合同工作流的单块输出，并转为审查页面的风险结构。"""
+"""校验分类检索审查工作流的单块输出，并转为审查页面的风险结构。"""
 
 import json
 import re
@@ -40,26 +40,26 @@ def _required_text(value: object, field: str) -> str:
     return value.strip()
 
 
-def validate_contract_report(outputs: dict, chunk_text: str) -> list[dict]:
+def validate_contract_report(outputs: dict, chunk_text: str, *, include_cases: bool = True) -> list[dict]:
     """失败时抛错，由审查任务将该块标记为需人工复核。"""
     report = outputs.get("report")
     if isinstance(report, str):
         try:
             report = json.loads(report)
         except json.JSONDecodeError as exc:
-            raise ValueError("合同审查报告不是合法 JSON") from exc
+            raise ValueError("审查报告不是合法 JSON") from exc
     if not isinstance(report, dict) or not isinstance(report.get("risks"), list):
-        raise ValueError("合同审查报告缺少 risks 数组")
+        raise ValueError("审查报告缺少 risks 数组")
 
     sources = []
     for key in ("legal_sources", "policy_sources"):
         value = outputs.get(key)
         if not isinstance(value, list):
-            raise ValueError(f"合同审查结果缺少 {key} 检索证据")
+            raise ValueError(f"审查结果缺少 {key} 检索证据")
         sources.extend(item for item in value if isinstance(item, dict))
     case_sources = outputs.get("case_sources")
-    if not isinstance(case_sources, list):
-        raise ValueError("合同审查结果缺少 case_sources 检索证据")
+    if include_cases and not isinstance(case_sources, list):
+        raise ValueError("审查结果缺少 case_sources 检索证据")
 
     result = []
     for index, item in enumerate(report["risks"], start=1):
@@ -74,8 +74,8 @@ def validate_contract_report(outputs: dict, chunk_text: str) -> list[dict]:
             raise ValueError(f"第 {index} 项风险等级无效")
         analysis = _required_text(item.get("analysis"), "analysis")
         suggestion = _required_text(item.get("suggestion"), "suggestion")
-        case_analysis = _required_text(item.get("caseAnalysis"), "caseAnalysis")
-        if case_analysis != "未检索到" and not case_sources:
+        case_analysis = _required_text(item.get("caseAnalysis"), "caseAnalysis") if include_cases else ""
+        if include_cases and case_analysis != "未检索到" and not case_sources:
             validation_notes.append("案例分析缺少本次检索依据")
         citations = item.get("citations")
         if not isinstance(citations, list):

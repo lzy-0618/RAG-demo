@@ -39,7 +39,7 @@ function stepState(index: number) {
 const progress = computed(() => {
   const t = task.value
   if (!t?.total_chunks) return 0
-  const processed = t.review_type === 'contract' && t.progress
+  const processed = t.progress
     ? t.progress.processed_chunks
     : t.completed_chunks + t.failed_chunks
   return Math.min(100, Math.round((processed / t.total_chunks) * 100))
@@ -155,12 +155,12 @@ onBeforeUnmount(stopPolling)
         <span class="hint u-num">
           {{ task.status === 'completed' ? '已完成' : task.status === 'failed' ? '失败' : '进行中' }}
           <template v-if="task.review_type !== 'contract' || task.total_chunks || contractStage === 'review'">
-            · 已处理 {{ task.review_type === 'contract' && task.progress ? task.progress.processed_chunks : task.completed_chunks + task.failed_chunks }}/{{ task.total_chunks || '—' }} 块
+            · 已处理 {{ task.progress ? task.progress.processed_chunks : task.completed_chunks + task.failed_chunks }}/{{ task.total_chunks || '—' }} 块
           </template>
           <template v-if="task.failed_chunks">（失败 {{ task.failed_chunks }} 块）</template>
         </span>
       </div>
-      <ol v-if="task.review_type === 'contract' && task.progress" class="process-steps">
+      <ol v-if="task.progress" class="process-steps">
         <li
           v-for="(step, index) in processSteps"
           :key="step.key"
